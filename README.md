@@ -24,7 +24,7 @@ Shiftly turns a photo of a weekly paper work timetable into editable calendar ev
 - Google Identity Services and Google Calendar API
 - Cloudflare-compatible Sites deployment
 
-The timetable reader uses Luna with `reasoning.effort: "none"` to minimize reasoning-token use and latency. Dense timetable images are still sent at high image detail so small text remains legible.
+The timetable reader uses Luna with `reasoning.effort: "low"` to keep reasoning-token use modest while still allowing the model to reason over row and column relationships. Dense timetable images are sent at high image detail so small text remains legible.
 
 ## Requirements
 
@@ -71,7 +71,9 @@ The local URL is printed in the terminal. If `OPENAI_API_KEY` is absent, the app
 6. Put the client ID—not the client secret—in `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
 7. In Google Calendar, create a calendar named exactly **Work**.
 
-Shiftly requests permission only when the user presses **Add to Google Calendar**. It searches for the `Work` calendar and uses a private event property to prevent duplicate imports.
+Shiftly uses Google Identity Services' browser token model. **Connect Google** opens Google's own account chooser and consent dialog. The returned short-lived access token tells the Calendar API which Google user selected the account; Shiftly then requests `GET /users/me/calendarList`, finds that user's writable `Work` calendar, and uses the Events API to add shifts. A private event property prevents duplicate imports.
+
+The access token is kept only in memory and is not saved by Shiftly. Google is the only application-level account connection. A private Sites deployment can still require its separate hosting sign-in before the app loads; that gate controls who may open the private site and does not decide which Google Calendar receives events.
 
 ## Privacy and secrets
 

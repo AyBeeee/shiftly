@@ -13,6 +13,12 @@ type Shift = {
   selected: boolean;
 };
 
+type GoogleConnection = {
+  accessToken: string;
+  email: string;
+  workCalendarId: string | null;
+};
+
 declare global {
   interface Window {
     google?: {
@@ -51,6 +57,9 @@ export default function Home() {
   const [stage, setStage] = useState<"upload" | "reading" | "review" | "done">("upload");
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const [googleConnecting, setGoogleConnecting] = useState(false);
+  const [googleConnection, setGoogleConnection] = useState<GoogleConnection | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -60,6 +69,7 @@ export default function Home() {
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
+    script.onload = () => setGoogleReady(true);
     document.head.appendChild(script);
     return () => {
       window.clearTimeout(restoreName);
@@ -147,61 +157,117 @@ export default function Home() {
     URL.revokeObjectURL(link.href);
   }
 
-  async function syncWithGoogle() {
+  async function connectGoogle(): Promise<GoogleConnection | null> {
+    if (!GOOGLE_CLIENT_ID) {
+      setNotice("Google Calendar needs a Google OAuth web client ID before it can connect.");
+      return null;
+    }
     if (!GOOGLE_CLIENT_ID || !window.google) {
-      setNotice("Google Calendar isn't connected yet. Download the calendar file instead, or add a Google OAuth client ID.");
+      setNotice("Google's account chooser is still loading. Try again in a moment.");
+      return null;
+    }
+    setGoogleConnecting(true);
+    setNotice("Connecting to Google Calendar…");
+    return new Promise((resolve) => {
+      const tokenClient = window.google!.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: "openid email https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
+        callback: async (token) => {
+          if (!token.access_token) {
+            setGoogleConnecting(false);
+            setNotice("Google Calendar connection was cancelled.");
+            resolve(null);
+            return;
+          }
+          try {
+            const headers = { Authorization: `Bearer ${token.access_token}` };
+            const [profileResponse, calendarsResponse] = await Promise.all([
+              fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers }),
+              fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer", { headers }),
+            ]);
+            if (!profileResponse.ok || !calendarsResponse.ok) throw new Error("Google did not grant the required Calendar access.");
+            const profile = await profileResponse.json() as { email?: string };
+            const calendars = await calendarsResponse.json() as { items?: Array<{ id: string; summary: string }> };
+            const workCalendar = calendars.items?.find((calendar) => calendar.summary.trim().toLowerCase() === "work");
+            const connection = {
+              accessToken: token.access_token,
+              email: profile.email || "Google account",
+              workCalendarId: workCalendar?.id ?? null,
+            };
+            setGoogleConnection(connection);
+            setNotice(workCalendar
+              ? `Connected ${connection.email} to the Work calendar.`
+              : `Connected ${connection.email}, but no writable calendar named “Work” was found.`);
+            resolve(connection);
+          } catch (error) {
+            setNotice(error instanceof Error ? error.message : "Google Calendar connection failed.");
+            resolve(null);
+          } finally {
+            setGoogleConnecting(false);
+          }
+        },
+      });
+      tokenClient.requestAccessToken({ prompt: "select_account" });
+    });
+  }
+
+  async function syncWithGoogle() {
+    const connection = googleConnection ?? await connectGoogle();
+    if (!connection) return;
+    if (!connection.workCalendarId) {
+      setNotice(`Create a writable Google calendar named “Work” in ${connection.email}, then reconnect.`);
       return;
     }
-    setNotice("Connecting to Google Calendar…");
-    const tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
-      callback: async (token) => {
-        if (!token.access_token) return setNotice("Google Calendar connection was cancelled.");
-        try {
-          const headers = { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json" };
-          const calendarsResponse = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", { headers });
-          const calendars = await calendarsResponse.json() as { items?: Array<{ id: string; summary: string }> };
-          const workCalendar = calendars.items?.find((calendar) => calendar.summary.toLowerCase() === "work");
-          if (!workCalendar) throw new Error('Create a Google calendar named “Work” first, then try again.');
-
-          for (const shift of shifts.filter((item) => item.selected)) {
-            const duplicateKey = `shiftly-${shift.date}-${shift.start}`;
-            const query = new URLSearchParams({
-              timeMin: new Date(calendarTimestamp(shift.date, "00:00")).toISOString(),
-              timeMax: new Date(calendarTimestamp(shift.date, "23:59")).toISOString(),
-              privateExtendedProperty: `shiftlyKey=${duplicateKey}`,
-              singleEvents: "true",
-            });
-            const existingResponse = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(workCalendar.id)}/events?${query}`, { headers });
-            const existing = await existingResponse.json() as { items?: unknown[] };
-            if (existing.items?.length) continue;
-            await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(workCalendar.id)}/events`, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                summary: shift.title || "Work",
-                start: { dateTime: calendarTimestamp(shift.date, shift.start), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
-                end: { dateTime: calendarTimestamp(shift.date, shift.end), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
-                extendedProperties: { private: { shiftlyKey: duplicateKey } },
-              }),
-            });
-          }
-          setStage("done");
-          setNotice("");
-        } catch (error) {
-          setNotice(error instanceof Error ? error.message : "Calendar sync failed.");
+    setNotice(`Adding shifts to ${connection.email} · Work…`);
+    try {
+      const headers = { Authorization: `Bearer ${connection.accessToken}`, "Content-Type": "application/json" };
+      for (const shift of shifts.filter((item) => item.selected)) {
+        const duplicateKey = `shiftly-${shift.date}-${shift.start}`;
+        const query = new URLSearchParams({
+          timeMin: new Date(calendarTimestamp(shift.date, "00:00")).toISOString(),
+          timeMax: new Date(calendarTimestamp(shift.date, "23:59")).toISOString(),
+          privateExtendedProperty: `shiftlyKey=${duplicateKey}`,
+          singleEvents: "true",
+        });
+        const calendarUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(connection.workCalendarId)}/events`;
+        const existingResponse = await fetch(`${calendarUrl}?${query}`, { headers });
+        if (existingResponse.status === 401) {
+          setGoogleConnection(null);
+          throw new Error("Your Google session expired. Reconnect and try again.");
         }
-      },
-    });
-    tokenClient.requestAccessToken({ prompt: "consent" });
+        if (!existingResponse.ok) throw new Error("Google Calendar could not check for duplicate shifts.");
+        const existing = await existingResponse.json() as { items?: unknown[] };
+        if (existing.items?.length) continue;
+        const insertResponse = await fetch(calendarUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            summary: shift.title || "Work",
+            start: { dateTime: calendarTimestamp(shift.date, shift.start), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+            end: { dateTime: calendarTimestamp(shift.date, shift.end), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+            extendedProperties: { private: { shiftlyKey: duplicateKey } },
+          }),
+        });
+        if (!insertResponse.ok) throw new Error(`Google Calendar could not add the ${shift.day} shift.`);
+      }
+      setStage("done");
+      setNotice("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Calendar sync failed.");
+    }
   }
 
   return (
     <main>
       <header className="topbar">
         <a className="brand" href="#" aria-label="Shiftly home"><span className="brand-mark">S</span> Shiftly</a>
-        <div className="header-note"><span className="pulse" /> Photos stay private</div>
+        <div className="header-actions">
+          <div className="header-note"><span className="pulse" /> Photos stay private</div>
+          <button className={`google-connect ${googleConnection ? "connected" : ""}`} onClick={connectGoogle} disabled={googleConnecting || (!googleReady && Boolean(GOOGLE_CLIENT_ID))}>
+            <span className="google-g">G</span>
+            {googleConnecting ? "Connecting…" : googleConnection ? googleConnection.email : "Connect Google"}
+          </button>
+        </div>
       </header>
 
       <section className="shell">
@@ -225,7 +291,7 @@ export default function Home() {
               <button className="text-button" onClick={reset}>Use another photo</button>
             </div>
             <div className="summary-strip">
-              <span><b>{selectedCount}</b> shifts</span><span><b>{totalHours}</b> hours</span><span className="calendar-chip"><i /> Work calendar</span>
+              <span><b>{selectedCount}</b> shifts</span><span><b>{totalHours}</b> hours</span><span className="calendar-chip"><i /> {googleConnection ? `${googleConnection.email} · Work` : "Google not connected"}</span>
             </div>
             <div className="shift-list">
               {shifts.map((shift) => (
@@ -243,9 +309,9 @@ export default function Home() {
             {notice && <p className="notice">{notice}</p>}
             <div className="actions">
               <button className="secondary" disabled={!selectedCount} onClick={exportIcs}>Download calendar file</button>
-              <button className="primary" disabled={!selectedCount} onClick={syncWithGoogle}>Add to Google Calendar <span>→</span></button>
+              <button className="primary" disabled={!selectedCount || googleConnecting} onClick={syncWithGoogle}>{googleConnection ? "Add to Work calendar" : "Connect & add to Work"} <span>→</span></button>
             </div>
-            <p className="fine-print">Duplicates are skipped automatically. Nothing is added until you press the button.</p>
+            <p className="fine-print">Google’s account chooser decides whose calendar is used. Duplicates are skipped automatically.</p>
           </section>
         ) : (
           <section className="upload-panel">

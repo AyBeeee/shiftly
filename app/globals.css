@@ -8,8 +8,14 @@ button { color:inherit; }
 .topbar { height:76px; padding:0 max(24px,calc((100vw - 1120px)/2)); display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); background:rgba(247,245,238,.92); }
 .brand { display:flex; gap:10px; align-items:center; color:var(--ink); text-decoration:none; font-weight:760; font-size:21px; letter-spacing:-.03em; }
 .brand-mark { width:31px; height:31px; display:grid; place-items:center; background:var(--forest); color:var(--mint); border-radius:9px; transform:rotate(-5deg); }
+.header-actions { display:flex; align-items:center; gap:18px; }
 .header-note { font-size:13px; color:var(--muted); display:flex; gap:8px; align-items:center; }
 .pulse { width:8px; height:8px; border-radius:50%; background:#70a450; box-shadow:0 0 0 4px #dfeed1; }
+.google-connect { display:flex; align-items:center; gap:8px; max-width:260px; border:1px solid #c9ccc4; background:#fff; border-radius:10px; padding:9px 12px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.google-connect:hover:not(:disabled) { border-color:#85927f; background:#fafcf7; }
+.google-connect:disabled { opacity:.55; cursor:not-allowed; }
+.google-connect.connected { border-color:#abc491; background:#f3f9e9; }
+.google-g { color:#4285f4; font-size:14px; font-weight:850; }
 .shell { width:min(920px,calc(100% - 32px)); margin:0 auto; padding:70px 0 46px; }
 .intro { text-align:center; max-width:690px; margin:0 auto 34px; }
 .eyebrow,.step { font-family:var(--font-geist-mono); color:#577c3e; font-size:12px; font-weight:700; letter-spacing:.14em; margin:0 0 13px; }
@@ -78,6 +84,9 @@ h1 { font-size:clamp(48px,7vw,76px); line-height:.96; margin:0; letter-spacing:-
 footer { text-align:center; border-top:1px solid var(--line); color:#848b87; font-size:11px; padding:24px; }
 @media (max-width:680px) {
   .topbar { height:64px; padding:0 18px; }
+  .header-actions { gap:8px; }
+  .header-note { display:none; }
+  .google-connect { max-width:190px; padding:8px 10px; }
   .shell { width:min(100% - 22px,920px); padding-top:48px; }
   h1 { font-size:49px; }
   .lede { font-size:16px; }
