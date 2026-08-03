@@ -6,7 +6,7 @@ Shiftly finds an employee by name, reads their row across the weekly columns, co
 
 ![Shiftly — timetable photo to calendar events](public/og.png)
 
-> Status: private early release. The interface and deployment are working; real timetable extraction and Google Calendar sync require the two environment values described below. Shiftly never substitutes sample shifts when real analysis is unavailable.
+> Status: private early release. The interface and deployment are working. Timetable extraction needs a key for one supported vision provider, while direct Google Calendar sync needs the Google OAuth client ID described below. Shiftly never substitutes sample shifts when real analysis is unavailable.
 
 ## Contents
 
@@ -15,7 +15,7 @@ Shiftly finds an employee by name, reads their row across the weekly columns, co
 - [Architecture](#architecture)
 - [Requirements](#requirements)
 - [Local setup](#local-setup)
-- [OpenAI setup](#openai-setup)
+- [AI provider setup](#ai-provider-setup)
 - [Google Calendar setup](#google-calendar-setup)
 - [Environment variables](#environment-variables)
 - [Development and validation](#development-and-validation)
@@ -42,7 +42,9 @@ Nothing is written to Google Calendar before the final confirmation button is pr
 - Automatic client-side optimization of large timetable photos
 - Employee-name row matching
 - Day-header and date interpretation
-- Structured shift extraction with `gpt-5.6-luna`
+- User-selectable Google Gemini, OpenRouter Free, or OpenAI vision analysis
+- Google Gemini free tier selected by default
+- Session-only API key input with no browser storage
 - Editable start and end times
 - Low-confidence warnings instead of silent guessing
 - Google account chooser with the connected email shown in the UI
@@ -57,8 +59,13 @@ Nothing is written to Google Calendar before the final confirmation button is pr
 ```mermaid
 flowchart LR
     A["Timetable photo + employee name"] --> B["POST /api/analyze"]
-    B --> C["OpenAI Responses API<br/>GPT-5.6 Luna · low effort"]
-    C --> D["Strict shift JSON"]
+    B --> C{"Selected vision provider"}
+    C --> C1["Gemini 2.5 Flash-Lite"]
+    C --> C2["OpenRouter Free router"]
+    C --> C3["OpenAI GPT-5.6 Luna · low effort"]
+    C1 --> D["Strict shift JSON"]
+    C2 --> D
+    C3 --> D
     D --> E["Editable review screen"]
     E --> F["Google OAuth account chooser"]
     F --> G["CalendarList: writable Work calendar"]
@@ -71,20 +78,20 @@ flowchart LR
 | Area | Location | Responsibility |
 | --- | --- | --- |
 | Main interface | `app/page.tsx` | Photo selection, shift review, Google connection, event insertion, and ICS export |
-| Analysis endpoint | `app/api/analyze/route.ts` | File validation, image encoding, OpenAI request, and structured response parsing |
+| Analysis endpoint | `app/api/analyze/route.ts` | File validation, image encoding, provider selection, and structured response parsing |
 | Styling | `app/globals.css` | Responsive layout and visual system |
 | Metadata | `app/layout.tsx` | Page title, description, icons, and social preview |
 | Runtime configuration | `next.config.ts` | Allows optimized timetable uploads through the hosted request layer |
 | Hosting worker | `worker/index.ts` | Cloudflare-compatible application entrypoint |
 | Hosting configuration | `.openai/hosting.json` | Sites project and optional resource bindings |
 
-The browser accepts JPEG, PNG, WebP, and non-animated GIF images up to 50 MB. Files larger than 3 MB are resized to a maximum 3200-pixel edge and progressively encoded as JPEG until they fit safely within the hosted request limit, including multipart overhead. The analysis endpoint applies a final 10 MB limit, then sends the image to the OpenAI Responses API as an in-memory data URL. The model is required to return a strict schema containing the day, date, start time, end time, title, and confidence for every detected shift.
+The browser accepts JPEG, PNG, and WebP images up to 50 MB. Files larger than 3 MB are resized to a maximum 3200-pixel edge and progressively encoded as JPEG until they fit safely within the hosted request limit, including multipart overhead. The analysis endpoint applies a final 10 MB limit, then sends the image to the selected provider in memory. Every provider is required to return the same strict schema containing the day, date, start time, end time, title, and confidence for every detected shift.
 
 ## Requirements
 
 - Node.js 22.13 or newer
 - npm
-- An OpenAI API key with access to `gpt-5.6-luna`
+- An API key for at least one supported provider: Google Gemini, OpenRouter, or OpenAI
 - A Google Cloud project
 - Google Calendar API enabled in that project
 - A Google OAuth 2.0 web client ID
@@ -102,9 +109,13 @@ cp .env.example .env.local
 Add the required values to `.env.local`:
 
 ```env
+GEMINI_API_KEY=your_optional_gemini_api_key
+OPENROUTER_API_KEY=your_optional_openrouter_api_key
 OPENAI_API_KEY=your_openai_api_key
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_oauth_web_client_id
 ```
+
+Only one AI provider key is needed. All three server values are optional when users enter their own key in the app for the current tab.
 
 Start the local server:
 
@@ -114,25 +125,21 @@ npm run dev
 
 Open the exact local URL printed in the terminal. Restart the development server after changing environment values.
 
-## OpenAI setup
+## AI provider setup
 
-1. Create an API key in the OpenAI platform.
-2. For persistent private setup, add it to `.env.local` as `OPENAI_API_KEY` and to the hosted `OPENAI_API_KEY` secret.
-3. Alternatively, enter it in Shiftly's **Connect OpenAI** panel. A key entered there remains only in the current browser tab and is not saved.
-4. Never expose the key through a `NEXT_PUBLIC_` variable or commit it to source control.
-5. Ensure the API project can use `gpt-5.6-luna`.
+Choose a provider in the upload screen, open its key-creation link, and paste the key into the password-masked field. The key remains only in React memory for the current tab and is not written to local storage. Alternatively, configure one or more private server secrets so users of the private deployment do not need to enter keys.
 
-The active request uses:
+| Provider | Server secret | Model or route | Notes |
+| --- | --- | --- | --- |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash-lite` | Default option; Google offers a limited free tier, subject to account, region, and rate limits |
+| OpenRouter Free | `OPENROUTER_API_KEY` | `openrouter/free` | Routes to an available free model that supports images and structured output; availability and results can vary |
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.6-luna` | Low reasoning effort and high image detail |
 
-- Model: `gpt-5.6-luna`
-- Reasoning effort: `low`
-- Image detail: `high`
-- Endpoint: Responses API
-- Output: strict JSON schema
+Never expose any provider key through a `NEXT_PUBLIC_` variable or commit it to source control. A hosted secret is used only when the user has not supplied a session key for that provider.
 
-High image detail is intentional because timetable cells often contain small text. Low reasoning effort keeps usage modest while still allowing the model to follow row and column relationships.
+The extraction prompt explicitly finds the printed day/date headers, matches only the requested employee row, reads its cell intersections from left to right, and ignores blank cells, days off, totals, store hours, highlighting, and neighboring rows. OpenAI uses high image detail because timetable cells contain small text; its low reasoning effort keeps usage modest.
 
-If the hosted `OPENAI_API_KEY` is missing, the app displays a password-masked field for a session-only key. If neither is supplied, `/api/analyze` returns a clear configuration error and no shifts. It never substitutes sample events for an uploaded timetable.
+If the selected provider has neither a hosted key nor a session key, `/api/analyze` returns a clear configuration error and no shifts. It never substitutes sample events for an uploaded timetable.
 
 ## Google Calendar setup
 
@@ -184,10 +191,12 @@ The token is held in memory only. Reloading the page or token expiration require
 
 | Variable | Required | Exposure | Purpose |
 | --- | --- | --- | --- |
-| `OPENAI_API_KEY` | For real OCR | Server secret | Authenticates timetable-analysis requests |
+| `GEMINI_API_KEY` | Optional | Server secret | Hosted Google Gemini timetable analysis |
+| `OPENROUTER_API_KEY` | Optional | Server secret | Hosted OpenRouter free-model timetable analysis |
+| `OPENAI_API_KEY` | Optional | Server secret | Hosted OpenAI timetable analysis |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | For Google sync | Public browser identifier | Starts Google's OAuth account chooser |
 
-`.env.example` contains names only and is safe to commit. `.env`, `.env.local`, and other real environment variants are ignored by Git.
+At least one AI key must be supplied either as a server secret or through the session-only field. `.env.example` contains names only and is safe to commit. `.env`, `.env.local`, and other real environment variants are ignored by Git.
 
 ## Development and validation
 
@@ -202,19 +211,10 @@ Before committing a release:
 
 ```bash
 npm run lint
-npm run build
+npm test
 ```
 
-The repository still contains the starter's legacy rendered-HTML test script, which targets the removed loading skeleton. It is not a valid Shiftly application test and should be replaced before `npm test` is used as a release check.
-
-Recommended application tests to add next:
-
-- Analysis endpoint validation and demo-mode responses
-- Structured shift parsing
-- Overnight and malformed time handling
-- ICS generation
-- Google duplicate detection
-- Expired OAuth token recovery
+The rendered-worker tests cover the application shell, provider configuration response, fail-closed key handling, image-type validation, and unknown-provider rejection. Live provider calls and Google writes are intentionally not run by the automated suite because they require private credentials and create external usage.
 
 ## Deployment
 
@@ -223,7 +223,7 @@ The project is configured for a private Sites deployment and produces Cloudflare
 Deployment requirements:
 
 1. Run `npm run build` successfully.
-2. Configure `OPENAI_API_KEY` as a secret in the hosting environment.
+2. Optionally configure one or more of `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, and `OPENAI_API_KEY` as hosting secrets. Without them, users provide a session key in the app.
 3. Configure `NEXT_PUBLIC_GOOGLE_CLIENT_ID` as an environment value.
 4. Add the deployed origin to the Google OAuth web client.
 5. Deploy the validated commit.
@@ -237,10 +237,10 @@ Private Sites access may show a separate ChatGPT hosting sign-in before Shiftly 
 
 ## Privacy and security
 
-- Timetable images are processed in memory by the application and sent to the configured OpenAI API project.
+- Timetable images are processed in memory by the application and sent to the provider selected by the user.
 - The application does not write uploaded photos to its database or filesystem.
 - The employee name is saved in the browser's local storage for convenience.
-- A hosted OpenAI key is used only on the server. A key entered in the app is held in React memory for the current tab, sent to Shiftly over HTTPS for analysis, and never written to browser storage or the repository.
+- Hosted AI keys are used only on the server. A key entered in the app is held in React memory for the current tab, sent to Shiftly over HTTPS for analysis, and never written to browser storage or the repository.
 - The Google OAuth client ID is public by design and is not a secret.
 - Google access tokens stay in browser memory and are not written to local storage or the server.
 - Calendar access is requested only through Google's consent flow.
@@ -248,13 +248,14 @@ Private Sites access may show a separate ChatGPT hosting sign-in before Shiftly 
 - Duplicate detection uses a private `shiftlyKey` event property.
 - Real environment files are excluded from source control.
 
-Review the data-processing and retention settings of the OpenAI and Google projects before using Shiftly with employee information.
+Review the data-processing and retention settings of the selected AI provider and Google before using Shiftly with employee information. Free tiers may apply different data-use terms from paid API service.
 
 ## Troubleshooting
 
 | Message or symptom | Likely cause | Fix |
 | --- | --- | --- |
-| OpenAI key is requested | The private hosted key is missing | Enter a key in the password-masked panel for this tab, or configure the hosted secret |
+| AI key is requested | The selected provider has no private hosted key | Enter its key in the password-masked panel for this tab, choose another configured provider, or configure the hosted secret |
+| Free provider is rate-limited | Its current free quota or model capacity is unavailable | Wait and retry, or choose another provider |
 | `Google Calendar needs a Google OAuth web client ID` | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is missing | Add the client ID and rebuild/redeploy |
 | Google popup reports an origin error | Current origin is not authorized | Add the exact scheme, host, and port to Authorized JavaScript origins |
 | Google consent blocks the user | OAuth app is in testing and the account is not allowed | Add the account as an OAuth test user or publish the consent app |
@@ -262,7 +263,7 @@ Review the data-processing and retention settings of the OpenAI and Google proje
 | Google session expired | Short-lived access token expired | Press **Connect Google** and retry |
 | No shifts found | Name mismatch or unreadable image | Use the printed name and retake the photo with the full table visible |
 | Photo is too large | The original exceeds 50 MB or remains oversized after optimization | Crop closer to the timetable, then choose the photo again |
-| Unsupported image | The file is not JPEG, PNG, WebP, or a non-animated GIF | Export or convert the photo to JPEG |
+| Unsupported image | The file is not JPEG, PNG, or WebP | Export or convert the photo to JPEG |
 | Times appear uncertain | One or more cells were difficult to read | Correct highlighted values before importing |
 | Events use an unexpected timezone | Browser timezone differs from the work location | Correct the device/browser timezone before importing |
 
@@ -271,11 +272,12 @@ Review the data-processing and retention settings of the OpenAI and Google proje
 - The complete day/date header and employee-name column must be visible.
 - Employee matching works best with the exact printed name.
 - Only one timetable image is analyzed per import.
+- Free provider quotas, model availability, latency, and extraction quality can vary.
 - The destination calendar name is fixed to `Work`.
 - Overnight shifts are not yet modeled across two dates.
 - Access tokens are not refreshed in the background.
 - Unusual layouts, handwriting, glare, blur, or perspective distortion may require manual corrections.
-- Automated Shiftly-specific test coverage has not yet replaced the starter test.
+- Provider extraction still requires human review before calendar insertion.
 
 ## Repository policy
 

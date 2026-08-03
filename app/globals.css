@@ -49,10 +49,14 @@ h1 { font-size:clamp(48px,7vw,76px); line-height:.96; margin:0; letter-spacing:-
 .trust-row span::first-letter { color:#5c8b3f; }
 .notice { background:#fff6db; border:1px solid #ead59a; color:#6f591e; border-radius:10px; padding:11px 13px; font-size:13px; margin:15px 0 0; }
 .api-key-panel { display:grid; grid-template-columns:minmax(0,.9fr) minmax(280px,1.1fr); gap:20px; align-items:center; margin-top:15px; padding:16px; border:1px solid #b9c8ac; border-radius:12px; background:#f3f8ec; }
-.api-key-copy b,.api-key-copy span,.api-key-field > span { display:block; }
+.api-key-copy b,.api-key-copy span,.api-provider-field > span,.api-key-field > span { display:block; }
 .api-key-copy b { font-size:14px; }
 .api-key-copy span { color:#657168; font-size:12px; line-height:1.45; margin-top:4px; }
-.api-key-field > span { color:#45504b; font-size:11px; font-weight:700; margin-bottom:6px; }
+.api-key-copy a { display:inline-block; color:#48613d; font-size:11px; font-weight:750; margin-top:7px; }
+.api-key-controls { display:grid; grid-template-columns:minmax(150px,.85fr) minmax(210px,1.15fr); gap:10px; align-items:end; }
+.api-provider-field > span,.api-key-field > span { color:#45504b; font-size:11px; font-weight:700; margin-bottom:6px; }
+.api-provider-field select { width:100%; min-height:39px; border:1px solid #aeb8a8; border-radius:9px; background:#fff; color:var(--ink); padding:9px 30px 9px 10px; outline:none; }
+.api-provider-field select:focus { border-color:#658b49; box-shadow:0 0 0 3px rgba(200,242,105,.35); }
 .api-key-field div { display:flex; border:1px solid #aeb8a8; border-radius:9px; overflow:hidden; background:#fff; }
 .api-key-field input { min-width:0; flex:1; border:0; outline:0; padding:10px 11px; background:transparent; }
 .api-key-field div:focus-within { border-color:#658b49; box-shadow:0 0 0 3px rgba(200,242,105,.35); }
@@ -104,6 +108,7 @@ footer { text-align:center; border-top:1px solid var(--line); color:#848b87; fon
   .saved { display:block; padding:8px 2px 0; }
   .trust-row { flex-wrap:wrap; gap:8px 15px; }
   .api-key-panel { grid-template-columns:1fr; gap:12px; }
+  .api-key-controls { grid-template-columns:1fr; }
   .how-it-works { grid-template-columns:1fr; gap:0; margin-top:30px; }
   .summary-strip { margin:20px -20px 16px; padding:12px 20px; gap:13px; }
   .calendar-chip { display:none; }

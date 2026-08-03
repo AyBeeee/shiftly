@@ -39,12 +39,45 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_UPLOAD_IMAGE_BYTES = 3 * 1024 * 1024;
 const MAX_UPLOAD_DIMENSION = 3200;
-const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+type AiProvider = "gemini" | "openrouter" | "openai";
+
+const AI_PROVIDERS: Record<AiProvider, {
+  label: string;
+  optionLabel: string;
+  placeholder: string;
+  keyUrl: string;
+  hint: string;
+}> = {
+  gemini: {
+    label: "Google Gemini",
+    optionLabel: "Google Gemini — free tier",
+    placeholder: "AIza…",
+    keyUrl: "https://aistudio.google.com/app/apikey",
+    hint: "A free tier is available; usage limits and regional availability apply.",
+  },
+  openrouter: {
+    label: "OpenRouter Free",
+    optionLabel: "OpenRouter — free models",
+    placeholder: "sk-or-v1-…",
+    keyUrl: "https://openrouter.ai/settings/keys",
+    hint: "Uses an available free vision model, so speed and results can vary.",
+  },
+  openai: {
+    label: "OpenAI",
+    optionLabel: "OpenAI",
+    placeholder: "sk-…",
+    keyUrl: "https://platform.openai.com/api-keys",
+    hint: "Uses GPT-5.6 Luna with low reasoning effort.",
+  },
+};
 
 type AnalysisResult = {
   shifts?: Shift[];
+  provider?: AiProvider;
   error?: string;
-  code?: "OPENAI_API_KEY_REQUIRED" | "OPENAI_API_KEY_INVALID";
+  code?: "AI_API_KEY_REQUIRED" | "AI_API_KEY_INVALID" | "AI_RATE_LIMITED";
 };
 
 function formatDate(date: string) {
@@ -65,7 +98,7 @@ function formatFileSize(bytes: number) {
 
 function isSupportedImage(file: File) {
   if (SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) return true;
-  return /\.(?:jpe?g|png|webp|gif)$/i.test(file.name);
+  return /\.(?:jpe?g|png|webp)$/i.test(file.name);
 }
 
 function loadImage(file: File) {
@@ -78,7 +111,7 @@ function loadImage(file: File) {
     };
     image.onerror = () => {
       URL.revokeObjectURL(source);
-      reject(new Error("This image could not be opened. Use a JPEG, PNG, WebP, or non-animated GIF."));
+      reject(new Error("This image could not be opened. Use a JPEG, PNG, or WebP image."));
     };
     image.src = source;
   });
@@ -140,9 +173,10 @@ export default function Home() {
   const [googleReady, setGoogleReady] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection | null>(null);
-  const [serverOpenAiConfigured, setServerOpenAiConfigured] = useState<boolean | null>(null);
-  const [openAiKey, setOpenAiKey] = useState("");
-  const [showOpenAiKey, setShowOpenAiKey] = useState(false);
+  const [configuredProviders, setConfiguredProviders] = useState<Record<AiProvider, boolean> | null>(null);
+  const [aiProvider, setAiProvider] = useState<AiProvider>("gemini");
+  const [aiApiKey, setAiApiKey] = useState("");
+  const [showAiApiKey, setShowAiApiKey] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -156,8 +190,12 @@ export default function Home() {
     document.head.appendChild(script);
     fetch("/api/config", { cache: "no-store" })
       .then((response) => response.json())
-      .then((config: { openAiConfigured?: boolean }) => setServerOpenAiConfigured(Boolean(config.openAiConfigured)))
-      .catch(() => setServerOpenAiConfigured(null));
+      .then((config: { configuredProviders?: Partial<Record<AiProvider, boolean>> }) => setConfiguredProviders({
+        gemini: Boolean(config.configuredProviders?.gemini),
+        openrouter: Boolean(config.configuredProviders?.openrouter),
+        openai: Boolean(config.configuredProviders?.openai),
+      }))
+      .catch(() => setConfiguredProviders(null));
     return () => {
       window.clearTimeout(restoreName);
       script.remove();
@@ -169,6 +207,8 @@ export default function Home() {
   }, [name]);
 
   const selectedCount = useMemo(() => shifts.filter((shift) => shift.selected).length, [shifts]);
+  const selectedProvider = AI_PROVIDERS[aiProvider];
+  const providerHasHostedKey = configuredProviders?.[aiProvider] ?? false;
   const totalHours = useMemo(() => shifts.filter((shift) => shift.selected).reduce((total, shift) => {
     const [sh, sm] = shift.start.split(":").map(Number);
     const [eh, em] = shift.end.split(":").map(Number);
@@ -178,7 +218,7 @@ export default function Home() {
   function chooseFile(nextFile?: File) {
     if (!nextFile) return;
     if (!isSupportedImage(nextFile)) {
-      setNotice("Use a JPEG, PNG, WebP, or non-animated GIF image.");
+      setNotice("Use a JPEG, PNG, or WebP image.");
       return;
     }
     if (nextFile.size > MAX_SOURCE_IMAGE_BYTES) {
@@ -198,7 +238,9 @@ export default function Home() {
   async function analyse() {
     if (!name.trim()) return setNotice("Add your name exactly as it appears on the timetable.");
     if (!file) return setNotice("Take or choose a timetable photo first.");
-    if (serverOpenAiConfigured === false && !openAiKey.trim()) return setNotice("Add your OpenAI API key below before reading the timetable.");
+    if (configuredProviders && !providerHasHostedKey && !aiApiKey.trim()) {
+      return setNotice(`Add a ${selectedProvider.label} API key below before reading the timetable.`);
+    }
     setStage("reading");
     setNotice("");
     try {
@@ -208,7 +250,8 @@ export default function Home() {
       const data = new FormData();
       data.append("image", uploadFile, uploadFile.name);
       data.append("name", name.trim());
-      if (openAiKey.trim()) data.append("openaiApiKey", openAiKey.trim());
+      data.append("provider", aiProvider);
+      if (aiApiKey.trim()) data.append("aiApiKey", aiApiKey.trim());
       const response = await fetch("/api/analyze", { method: "POST", body: data });
       const rawResult = await response.text();
       let result: AnalysisResult;
@@ -220,7 +263,14 @@ export default function Home() {
         }
         throw new Error("The timetable service returned an unexpected response. Please try again.");
       }
-      if (result.code === "OPENAI_API_KEY_REQUIRED") setServerOpenAiConfigured(false);
+      if (result.code === "AI_API_KEY_REQUIRED") {
+        setConfiguredProviders((current) => ({
+          gemini: current?.gemini ?? false,
+          openrouter: current?.openrouter ?? false,
+          openai: current?.openai ?? false,
+          [aiProvider]: false,
+        }));
+      }
       if (!response.ok || !result.shifts) throw new Error(result.error || "We couldn't read this timetable.");
       setShifts(result.shifts.map((shift, index) => ({ ...shift, id: shift.id || `${shift.date}-${index}`, selected: true })));
       setStage("review");
@@ -440,30 +490,47 @@ export default function Home() {
               {preview ? <img src={preview} alt="Selected timetable" /> : <div className="camera">⌁</div>}
               <div><b>{file ? file.name : "Take or choose a photo"}</b><span>{file ? `${formatFileSize(file.size)} · ${file.size > MAX_UPLOAD_IMAGE_BYTES ? "optimized before upload" : "Tap to replace it"}` : "Make sure the full table and day headers are visible"}</span></div>
             </button>
-            <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" capture="environment" onChange={handleFile} />
+            <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" capture="environment" onChange={handleFile} />
             {notice && <p className="notice">{notice}</p>}
-            {serverOpenAiConfigured === false && (
-              <div className="api-key-panel">
-                <div className="api-key-copy">
-                  <b>Connect OpenAI</b>
-                  <span>Required for real timetable reading. Your key stays only in this browser tab and is never saved.</span>
-                </div>
+            <div className="api-key-panel">
+              <div className="api-key-copy">
+                <b>Choose timetable AI</b>
+                <span>{selectedProvider.hint} Keys stay only in this browser tab and are never saved.</span>
+                <a href={selectedProvider.keyUrl} target="_blank" rel="noreferrer">Get a {selectedProvider.label} key ↗</a>
+              </div>
+              <div className="api-key-controls">
+                <label className="api-provider-field">
+                  <span>AI provider</span>
+                  <select
+                    value={aiProvider}
+                    onChange={(event) => {
+                      setAiProvider(event.target.value as AiProvider);
+                      setAiApiKey("");
+                      setShowAiApiKey(false);
+                      setNotice("");
+                    }}
+                  >
+                    {(Object.entries(AI_PROVIDERS) as Array<[AiProvider, typeof AI_PROVIDERS[AiProvider]]>).map(([value, provider]) => (
+                      <option key={value} value={value}>{provider.optionLabel}</option>
+                    ))}
+                  </select>
+                </label>
                 <label className="api-key-field">
-                  <span>OpenAI API key</span>
+                  <span>{providerHasHostedKey ? "API key (optional)" : "API key"}</span>
                   <div>
                     <input
-                      type={showOpenAiKey ? "text" : "password"}
-                      value={openAiKey}
-                      onChange={(event) => setOpenAiKey(event.target.value)}
-                      placeholder="sk-…"
+                      type={showAiApiKey ? "text" : "password"}
+                      value={aiApiKey}
+                      onChange={(event) => setAiApiKey(event.target.value)}
+                      placeholder={providerHasHostedKey ? "Using private hosted key" : selectedProvider.placeholder}
                       autoComplete="off"
                       spellCheck={false}
                     />
-                    <button type="button" onClick={() => setShowOpenAiKey((current) => !current)}>{showOpenAiKey ? "Hide" : "Show"}</button>
+                    <button type="button" onClick={() => setShowAiApiKey((current) => !current)}>{showAiApiKey ? "Hide" : "Show"}</button>
                   </div>
                 </label>
               </div>
-            )}
+            </div>
             <button className="primary wide" disabled={stage === "reading"} onClick={analyse}>
               {stage === "reading" ? <><span className="spinner" /> Reading your timetable…</> : <>Find my shifts <span>→</span></>}
             </button>
