@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
 const demoShifts = [
   { id: "mon", day: "Monday", date: "2026-08-03", start: "09:00", end: "17:00", title: "Work", confidence: "high" },
   { id: "tue", day: "Tuesday", date: "2026-08-04", start: "10:00", end: "18:00", title: "Work", confidence: "high" },
@@ -8,14 +11,20 @@ const demoShifts = [
 ];
 
 export async function POST(request: Request) {
-  const form = await request.formData();
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return NextResponse.json({ error: "The upload could not be read. Please choose the timetable photo again." }, { status: 400 });
+  }
   const image = form.get("image");
   const name = String(form.get("name") ?? "").trim();
   if (!name || !(image instanceof File)) return NextResponse.json({ error: "A name and timetable photo are required." }, { status: 400 });
+  if (!SUPPORTED_IMAGE_TYPES.has(image.type.toLowerCase())) return NextResponse.json({ error: "Use a JPEG, PNG, WebP, or non-animated GIF image." }, { status: 415 });
+  if (image.size > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Please use an image smaller than 10 MB." }, { status: 413 });
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ shifts: demoShifts, demo: true });
-  if (image.size > 10 * 1024 * 1024) return NextResponse.json({ error: "Please use an image smaller than 10 MB." }, { status: 413 });
 
   const bytes = Buffer.from(await image.arrayBuffer());
   const dataUrl = `data:${image.type || "image/jpeg"};base64,${bytes.toString("base64")}`;

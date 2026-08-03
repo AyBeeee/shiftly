@@ -39,6 +39,7 @@ Nothing is written to Google Calendar before the final confirmation button is pr
 ## Features
 
 - Mobile camera capture and desktop image upload
+- Automatic client-side optimization of large timetable photos
 - Employee-name row matching
 - Day-header and date interpretation
 - Structured shift extraction with `gpt-5.6-luna`
@@ -73,10 +74,11 @@ flowchart LR
 | Analysis endpoint | `app/api/analyze/route.ts` | File validation, image encoding, OpenAI request, and structured response parsing |
 | Styling | `app/globals.css` | Responsive layout and visual system |
 | Metadata | `app/layout.tsx` | Page title, description, icons, and social preview |
+| Runtime configuration | `next.config.ts` | Allows optimized timetable uploads through the hosted request layer |
 | Hosting worker | `worker/index.ts` | Cloudflare-compatible application entrypoint |
 | Hosting configuration | `.openai/hosting.json` | Sites project and optional resource bindings |
 
-The analysis endpoint accepts an image up to 10 MB and sends it to the OpenAI Responses API as an in-memory data URL. The model is required to return a strict schema containing the day, date, start time, end time, title, and confidence for every detected shift.
+The browser accepts JPEG, PNG, WebP, and non-animated GIF images up to 50 MB. Files larger than 3 MB are resized to a maximum 3200-pixel edge and progressively encoded as JPEG until they fit safely within the hosted request limit, including multipart overhead. The analysis endpoint applies a final 10 MB limit, then sends the image to the OpenAI Responses API as an in-memory data URL. The model is required to return a strict schema containing the day, date, start time, end time, title, and confidence for every detected shift.
 
 ## Requirements
 
@@ -258,6 +260,8 @@ Review the data-processing and retention settings of the OpenAI and Google proje
 | No writable calendar named `Work` | Calendar is missing, differently named, or read-only | Create `Work` or grant the selected account write access, then reconnect |
 | Google session expired | Short-lived access token expired | Press **Connect Google** and retry |
 | No shifts found | Name mismatch or unreadable image | Use the printed name and retake the photo with the full table visible |
+| Photo is too large | The original exceeds 50 MB or remains oversized after optimization | Crop closer to the timetable, then choose the photo again |
+| Unsupported image | The file is not JPEG, PNG, WebP, or a non-animated GIF | Export or convert the photo to JPEG |
 | Times appear uncertain | One or more cells were difficult to read | Correct highlighted values before importing |
 | Events use an unexpected timezone | Browser timezone differs from the work location | Correct the device/browser timezone before importing |
 

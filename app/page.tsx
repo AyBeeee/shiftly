@@ -36,6 +36,16 @@ declare global {
 }
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
+const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_UPLOAD_IMAGE_BYTES = 3 * 1024 * 1024;
+const MAX_UPLOAD_DIMENSION = 3200;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+type AnalysisResult = {
+  shifts?: Shift[];
+  error?: string;
+  demo?: boolean;
+};
 
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(`${date}T12:00:00`));
@@ -47,6 +57,76 @@ function calendarTimestamp(date: string, time: string) {
 
 function escapeIcs(value: string) {
   return value.replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
+}
+
+function formatFileSize(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 1 : 2)} MB`;
+}
+
+function isSupportedImage(file: File) {
+  if (SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) return true;
+  return /\.(?:jpe?g|png|webp|gif)$/i.test(file.name);
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const source = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(source);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(source);
+      reject(new Error("This image could not be opened. Use a JPEG, PNG, WebP, or non-animated GIF."));
+    };
+    image.src = source;
+  });
+}
+
+function encodeJpeg(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("This photo could not be prepared for upload."));
+    }, "image/jpeg", quality);
+  });
+}
+
+async function prepareImageForUpload(file: File) {
+  if (file.size <= MAX_UPLOAD_IMAGE_BYTES) return file;
+
+  const image = await loadImage(file);
+  const initialScale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight));
+  let width = Math.max(1, Math.round(image.naturalWidth * initialScale));
+  let height = Math.max(1, Math.round(image.naturalHeight * initialScale));
+  let quality = 0.9;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("This browser cannot prepare the timetable photo.");
+
+  while (true) {
+    canvas.width = width;
+    canvas.height = height;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, 0, 0, width, height);
+    const blob = await encodeJpeg(canvas, quality);
+    if (blob.size <= MAX_UPLOAD_IMAGE_BYTES) {
+      const baseName = file.name.replace(/\.[^.]+$/, "") || "timetable";
+      return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
+    }
+    if (quality > 0.72) {
+      quality = Math.max(0.7, quality - 0.08);
+      continue;
+    }
+    if (Math.max(width, height) <= 1600) {
+      throw new Error("This photo remains too large after optimization. Crop it closer to the timetable and try again.");
+    }
+    width = Math.max(1, Math.round(width * 0.82));
+    height = Math.max(1, Math.round(height * 0.82));
+    quality = 0.86;
+  }
 }
 
 export default function Home() {
@@ -89,7 +169,15 @@ export default function Home() {
   }, 0), [shifts]);
 
   function chooseFile(nextFile?: File) {
-    if (!nextFile || !nextFile.type.startsWith("image/")) return;
+    if (!nextFile) return;
+    if (!isSupportedImage(nextFile)) {
+      setNotice("Use a JPEG, PNG, WebP, or non-animated GIF image.");
+      return;
+    }
+    if (nextFile.size > MAX_SOURCE_IMAGE_BYTES) {
+      setNotice("This photo is larger than 50 MB. Crop it closer to the timetable and try again.");
+      return;
+    }
     if (preview) URL.revokeObjectURL(preview);
     setFile(nextFile);
     setPreview(URL.createObjectURL(nextFile));
@@ -106,11 +194,23 @@ export default function Home() {
     setStage("reading");
     setNotice("");
     try {
+      if (file.size > MAX_UPLOAD_IMAGE_BYTES) setNotice("Optimizing this large photo before upload…");
+      const uploadFile = await prepareImageForUpload(file);
+      setNotice("");
       const data = new FormData();
-      data.append("image", file);
+      data.append("image", uploadFile, uploadFile.name);
       data.append("name", name.trim());
       const response = await fetch("/api/analyze", { method: "POST", body: data });
-      const result = await response.json() as { shifts?: Shift[]; error?: string; demo?: boolean };
+      const rawResult = await response.text();
+      let result: AnalysisResult;
+      try {
+        result = rawResult ? JSON.parse(rawResult) as AnalysisResult : {};
+      } catch {
+        if (response.status === 413 || /payload too large/i.test(rawResult)) {
+          throw new Error("The optimized photo is still too large to upload. Crop it closer to the timetable and try again.");
+        }
+        throw new Error("The timetable service returned an unexpected response. Please try again.");
+      }
       if (!response.ok || !result.shifts) throw new Error(result.error || "We couldn't read this timetable.");
       setShifts(result.shifts.map((shift, index) => ({ ...shift, id: shift.id || `${shift.date}-${index}`, selected: true })));
       setStage("review");
@@ -329,9 +429,9 @@ export default function Home() {
               {/* Blob previews are local-only and cannot use the framework image optimizer. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {preview ? <img src={preview} alt="Selected timetable" /> : <div className="camera">⌁</div>}
-              <div><b>{file ? file.name : "Take or choose a photo"}</b><span>{file ? "Tap to replace it" : "Make sure the full table and day headers are visible"}</span></div>
+              <div><b>{file ? file.name : "Take or choose a photo"}</b><span>{file ? `${formatFileSize(file.size)} · ${file.size > MAX_UPLOAD_IMAGE_BYTES ? "optimized before upload" : "Tap to replace it"}` : "Make sure the full table and day headers are visible"}</span></div>
             </button>
-            <input ref={inputRef} hidden type="file" accept="image/*" capture="environment" onChange={handleFile} />
+            <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" capture="environment" onChange={handleFile} />
             {notice && <p className="notice">{notice}</p>}
             <button className="primary wide" disabled={stage === "reading"} onClick={analyse}>
               {stage === "reading" ? <><span className="spinner" /> Reading your timetable…</> : <>Find my shifts <span>→</span></>}
