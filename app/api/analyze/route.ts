@@ -12,12 +12,16 @@ export async function POST(request: Request) {
   }
   const image = form.get("image");
   const name = String(form.get("name") ?? "").trim();
+  const suppliedApiKey = String(form.get("openaiApiKey") ?? "").trim();
   if (!name || !(image instanceof File)) return NextResponse.json({ error: "A name and timetable photo are required." }, { status: 400 });
   if (!SUPPORTED_IMAGE_TYPES.has(image.type.toLowerCase())) return NextResponse.json({ error: "Use a JPEG, PNG, WebP, or non-animated GIF image." }, { status: 415 });
   if (image.size > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Please use an image smaller than 10 MB." }, { status: 413 });
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "Real timetable reading is not configured yet. Add the private OpenAI API key in the deployment settings." }, { status: 503 });
+  const apiKey = suppliedApiKey || process.env.OPENAI_API_KEY;
+  if (!apiKey) return NextResponse.json({
+    error: "Add your OpenAI API key below to read the real timetable.",
+    code: "OPENAI_API_KEY_REQUIRED",
+  }, { status: 503 });
 
   const bytes = Buffer.from(await image.arrayBuffer());
   const dataUrl = `data:${image.type || "image/jpeg"};base64,${bytes.toString("base64")}`;
@@ -58,6 +62,10 @@ export async function POST(request: Request) {
   });
 
   const result = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }>; error?: { message?: string } };
+  if (response.status === 401) return NextResponse.json({
+    error: "OpenAI rejected this API key. Check the key and try again.",
+    code: "OPENAI_API_KEY_INVALID",
+  }, { status: 401 });
   if (!response.ok) return NextResponse.json({ error: result.error?.message || "The timetable reader is unavailable." }, { status: 502 });
   const outputText = result.output_text ?? result.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text;
   if (!outputText) return NextResponse.json({ error: "No shifts were found for that name." }, { status: 422 });

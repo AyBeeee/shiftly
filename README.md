@@ -117,9 +117,10 @@ Open the exact local URL printed in the terminal. Restart the development server
 ## OpenAI setup
 
 1. Create an API key in the OpenAI platform.
-2. Add it to `.env.local` as `OPENAI_API_KEY`.
-3. Keep the key server-side. Never expose it through a `NEXT_PUBLIC_` variable.
-4. Ensure the API project can use `gpt-5.6-luna`.
+2. For persistent private setup, add it to `.env.local` as `OPENAI_API_KEY` and to the hosted `OPENAI_API_KEY` secret.
+3. Alternatively, enter it in Shiftly's **Connect OpenAI** panel. A key entered there remains only in the current browser tab and is not saved.
+4. Never expose the key through a `NEXT_PUBLIC_` variable or commit it to source control.
+5. Ensure the API project can use `gpt-5.6-luna`.
 
 The active request uses:
 
@@ -131,7 +132,7 @@ The active request uses:
 
 High image detail is intentional because timetable cells often contain small text. Low reasoning effort keeps usage modest while still allowing the model to follow row and column relationships.
 
-If `OPENAI_API_KEY` is missing, `/api/analyze` returns a clear configuration error and no shifts. It never substitutes sample events for an uploaded timetable.
+If the hosted `OPENAI_API_KEY` is missing, the app displays a password-masked field for a session-only key. If neither is supplied, `/api/analyze` returns a clear configuration error and no shifts. It never substitutes sample events for an uploaded timetable.
 
 ## Google Calendar setup
 
@@ -239,7 +240,7 @@ Private Sites access may show a separate ChatGPT hosting sign-in before Shiftly 
 - Timetable images are processed in memory by the application and sent to the configured OpenAI API project.
 - The application does not write uploaded photos to its database or filesystem.
 - The employee name is saved in the browser's local storage for convenience.
-- The OpenAI key is used only on the server.
+- A hosted OpenAI key is used only on the server. A key entered in the app is held in React memory for the current tab, sent to Shiftly over HTTPS for analysis, and never written to browser storage or the repository.
 - The Google OAuth client ID is public by design and is not a secret.
 - Google access tokens stay in browser memory and are not written to local storage or the server.
 - Calendar access is requested only through Google's consent flow.
@@ -253,7 +254,7 @@ Review the data-processing and retention settings of the OpenAI and Google proje
 
 | Message or symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Real timetable reading is not configured | `OPENAI_API_KEY` is missing | Add the key as a private hosted secret, then redeploy |
+| OpenAI key is requested | The private hosted key is missing | Enter a key in the password-masked panel for this tab, or configure the hosted secret |
 | `Google Calendar needs a Google OAuth web client ID` | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is missing | Add the client ID and rebuild/redeploy |
 | Google popup reports an origin error | Current origin is not authorized | Add the exact scheme, host, and port to Authorized JavaScript origins |
 | Google consent blocks the user | OAuth app is in testing and the account is not allowed | Add the account as an OAuth test user or publish the consent app |

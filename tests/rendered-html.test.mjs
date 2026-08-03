@@ -33,10 +33,17 @@ test("server-renders the Shiftly application", async () => {
   assert.doesNotMatch(html, /codex-preview/);
 });
 
+test("configuration endpoint reports whether a hosted AI key exists", async () => {
+  const response = await request("/api/config");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { openAiConfigured: false });
+});
+
 test("analysis endpoint validates size before checking configuration", async () => {
   const route = await readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8");
   const sizeValidation = route.indexOf("image.size > MAX_IMAGE_BYTES");
-  const configurationCheck = route.indexOf("const apiKey = process.env.OPENAI_API_KEY");
+  const configurationCheck = route.indexOf("const apiKey = suppliedApiKey || process.env.OPENAI_API_KEY");
   assert.ok(sizeValidation > 0);
   assert.ok(configurationCheck > sizeValidation);
   assert.doesNotMatch(route, /demoShifts|demo:\s*true/);
@@ -50,7 +57,8 @@ test("analysis endpoint fails closed when AI is not configured", async () => {
   const response = await request("/api/analyze", { method: "POST", body: form });
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), {
-    error: "Real timetable reading is not configured yet. Add the private OpenAI API key in the deployment settings.",
+    error: "Add your OpenAI API key below to read the real timetable.",
+    code: "OPENAI_API_KEY_REQUIRED",
   });
 });
 

@@ -44,6 +44,7 @@ const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", 
 type AnalysisResult = {
   shifts?: Shift[];
   error?: string;
+  code?: "OPENAI_API_KEY_REQUIRED" | "OPENAI_API_KEY_INVALID";
 };
 
 function formatDate(date: string) {
@@ -139,6 +140,9 @@ export default function Home() {
   const [googleReady, setGoogleReady] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection | null>(null);
+  const [serverOpenAiConfigured, setServerOpenAiConfigured] = useState<boolean | null>(null);
+  const [openAiKey, setOpenAiKey] = useState("");
+  const [showOpenAiKey, setShowOpenAiKey] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -150,6 +154,10 @@ export default function Home() {
     script.async = true;
     script.onload = () => setGoogleReady(true);
     document.head.appendChild(script);
+    fetch("/api/config", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((config: { openAiConfigured?: boolean }) => setServerOpenAiConfigured(Boolean(config.openAiConfigured)))
+      .catch(() => setServerOpenAiConfigured(null));
     return () => {
       window.clearTimeout(restoreName);
       script.remove();
@@ -190,6 +198,7 @@ export default function Home() {
   async function analyse() {
     if (!name.trim()) return setNotice("Add your name exactly as it appears on the timetable.");
     if (!file) return setNotice("Take or choose a timetable photo first.");
+    if (serverOpenAiConfigured === false && !openAiKey.trim()) return setNotice("Add your OpenAI API key below before reading the timetable.");
     setStage("reading");
     setNotice("");
     try {
@@ -199,6 +208,7 @@ export default function Home() {
       const data = new FormData();
       data.append("image", uploadFile, uploadFile.name);
       data.append("name", name.trim());
+      if (openAiKey.trim()) data.append("openaiApiKey", openAiKey.trim());
       const response = await fetch("/api/analyze", { method: "POST", body: data });
       const rawResult = await response.text();
       let result: AnalysisResult;
@@ -210,6 +220,7 @@ export default function Home() {
         }
         throw new Error("The timetable service returned an unexpected response. Please try again.");
       }
+      if (result.code === "OPENAI_API_KEY_REQUIRED") setServerOpenAiConfigured(false);
       if (!response.ok || !result.shifts) throw new Error(result.error || "We couldn't read this timetable.");
       setShifts(result.shifts.map((shift, index) => ({ ...shift, id: shift.id || `${shift.date}-${index}`, selected: true })));
       setStage("review");
@@ -431,6 +442,28 @@ export default function Home() {
             </button>
             <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" capture="environment" onChange={handleFile} />
             {notice && <p className="notice">{notice}</p>}
+            {serverOpenAiConfigured === false && (
+              <div className="api-key-panel">
+                <div className="api-key-copy">
+                  <b>Connect OpenAI</b>
+                  <span>Required for real timetable reading. Your key stays only in this browser tab and is never saved.</span>
+                </div>
+                <label className="api-key-field">
+                  <span>OpenAI API key</span>
+                  <div>
+                    <input
+                      type={showOpenAiKey ? "text" : "password"}
+                      value={openAiKey}
+                      onChange={(event) => setOpenAiKey(event.target.value)}
+                      placeholder="sk-…"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button type="button" onClick={() => setShowOpenAiKey((current) => !current)}>{showOpenAiKey ? "Hide" : "Show"}</button>
+                  </div>
+                </label>
+              </div>
+            )}
             <button className="primary wide" disabled={stage === "reading"} onClick={analyse}>
               {stage === "reading" ? <><span className="spinner" /> Reading your timetable…</> : <>Find my shifts <span>→</span></>}
             </button>
