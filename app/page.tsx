@@ -190,11 +190,17 @@ export default function Home() {
     document.head.appendChild(script);
     fetch("/api/config", { cache: "no-store" })
       .then((response) => response.json())
-      .then((config: { configuredProviders?: Partial<Record<AiProvider, boolean>> }) => setConfiguredProviders({
-        gemini: Boolean(config.configuredProviders?.gemini),
-        openrouter: Boolean(config.configuredProviders?.openrouter),
-        openai: Boolean(config.configuredProviders?.openai),
-      }))
+      .then((config: { configuredProviders?: Partial<Record<AiProvider, boolean>> }) => {
+        const nextConfiguredProviders = {
+          gemini: Boolean(config.configuredProviders?.gemini),
+          openrouter: Boolean(config.configuredProviders?.openrouter),
+          openai: Boolean(config.configuredProviders?.openai),
+        };
+        setConfiguredProviders(nextConfiguredProviders);
+        if (nextConfiguredProviders.gemini) setAiProvider("gemini");
+        else if (nextConfiguredProviders.openrouter) setAiProvider("openrouter");
+        else if (nextConfiguredProviders.openai) setAiProvider("openai");
+      })
       .catch(() => setConfiguredProviders(null));
     return () => {
       window.clearTimeout(restoreName);
