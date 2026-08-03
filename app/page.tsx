@@ -35,49 +35,15 @@ declare global {
   }
 }
 
-const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_UPLOAD_IMAGE_BYTES = 3 * 1024 * 1024;
 const MAX_UPLOAD_DIMENSION = 3200;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-type AiProvider = "gemini" | "openrouter" | "openai";
-
-const AI_PROVIDERS: Record<AiProvider, {
-  label: string;
-  optionLabel: string;
-  placeholder: string;
-  keyUrl: string;
-  hint: string;
-}> = {
-  gemini: {
-    label: "Google Gemini",
-    optionLabel: "Google Gemini — free tier",
-    placeholder: "AIza…",
-    keyUrl: "https://aistudio.google.com/app/apikey",
-    hint: "A free tier is available; usage limits and regional availability apply.",
-  },
-  openrouter: {
-    label: "OpenRouter Free",
-    optionLabel: "OpenRouter — free models",
-    placeholder: "sk-or-v1-…",
-    keyUrl: "https://openrouter.ai/settings/keys",
-    hint: "Uses an available free vision model, so speed and results can vary.",
-  },
-  openai: {
-    label: "OpenAI",
-    optionLabel: "OpenAI",
-    placeholder: "sk-…",
-    keyUrl: "https://platform.openai.com/api-keys",
-    hint: "Uses GPT-5.6 Luna with low reasoning effort.",
-  },
-};
-
 type AnalysisResult = {
   shifts?: Shift[];
-  provider?: AiProvider;
   error?: string;
-  code?: "AI_API_KEY_REQUIRED" | "AI_API_KEY_INVALID" | "AI_RATE_LIMITED";
+  code?: "OPENAI_API_KEY_REQUIRED" | "OPENAI_API_KEY_INVALID" | "OPENAI_RATE_LIMITED";
 };
 
 function formatDate(date: string) {
@@ -173,10 +139,8 @@ export default function Home() {
   const [googleReady, setGoogleReady] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection | null>(null);
-  const [configuredProviders, setConfiguredProviders] = useState<Record<AiProvider, boolean> | null>(null);
-  const [aiProvider, setAiProvider] = useState<AiProvider>("gemini");
-  const [aiApiKey, setAiApiKey] = useState("");
-  const [showAiApiKey, setShowAiApiKey] = useState(false);
+  const [openAiConfigured, setOpenAiConfigured] = useState<boolean | null>(null);
+  const [googleClientId, setGoogleClientId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -190,18 +154,11 @@ export default function Home() {
     document.head.appendChild(script);
     fetch("/api/config", { cache: "no-store" })
       .then((response) => response.json())
-      .then((config: { configuredProviders?: Partial<Record<AiProvider, boolean>> }) => {
-        const nextConfiguredProviders = {
-          gemini: Boolean(config.configuredProviders?.gemini),
-          openrouter: Boolean(config.configuredProviders?.openrouter),
-          openai: Boolean(config.configuredProviders?.openai),
-        };
-        setConfiguredProviders(nextConfiguredProviders);
-        if (nextConfiguredProviders.gemini) setAiProvider("gemini");
-        else if (nextConfiguredProviders.openrouter) setAiProvider("openrouter");
-        else if (nextConfiguredProviders.openai) setAiProvider("openai");
+      .then((config: { openAiConfigured?: boolean; googleClientId?: string }) => {
+        setOpenAiConfigured(Boolean(config.openAiConfigured));
+        setGoogleClientId(config.googleClientId ?? "");
       })
-      .catch(() => setConfiguredProviders(null));
+      .catch(() => setOpenAiConfigured(null));
     return () => {
       window.clearTimeout(restoreName);
       script.remove();
@@ -213,8 +170,6 @@ export default function Home() {
   }, [name]);
 
   const selectedCount = useMemo(() => shifts.filter((shift) => shift.selected).length, [shifts]);
-  const selectedProvider = AI_PROVIDERS[aiProvider];
-  const providerHasHostedKey = configuredProviders?.[aiProvider] ?? false;
   const totalHours = useMemo(() => shifts.filter((shift) => shift.selected).reduce((total, shift) => {
     const [sh, sm] = shift.start.split(":").map(Number);
     const [eh, em] = shift.end.split(":").map(Number);
@@ -244,9 +199,7 @@ export default function Home() {
   async function analyse() {
     if (!name.trim()) return setNotice("Add your name exactly as it appears on the timetable.");
     if (!file) return setNotice("Take or choose a timetable photo first.");
-    if (configuredProviders && !providerHasHostedKey && !aiApiKey.trim()) {
-      return setNotice(`Add a ${selectedProvider.label} API key below before reading the timetable.`);
-    }
+    if (openAiConfigured === false) return setNotice("Timetable reading is temporarily unavailable.");
     setStage("reading");
     setNotice("");
     try {
@@ -256,8 +209,6 @@ export default function Home() {
       const data = new FormData();
       data.append("image", uploadFile, uploadFile.name);
       data.append("name", name.trim());
-      data.append("provider", aiProvider);
-      if (aiApiKey.trim()) data.append("aiApiKey", aiApiKey.trim());
       const response = await fetch("/api/analyze", { method: "POST", body: data });
       const rawResult = await response.text();
       let result: AnalysisResult;
@@ -269,14 +220,7 @@ export default function Home() {
         }
         throw new Error("The timetable service returned an unexpected response. Please try again.");
       }
-      if (result.code === "AI_API_KEY_REQUIRED") {
-        setConfiguredProviders((current) => ({
-          gemini: current?.gemini ?? false,
-          openrouter: current?.openrouter ?? false,
-          openai: current?.openai ?? false,
-          [aiProvider]: false,
-        }));
-      }
+      if (result.code === "OPENAI_API_KEY_REQUIRED") setOpenAiConfigured(false);
       if (!response.ok || !result.shifts) throw new Error(result.error || "We couldn't read this timetable.");
       setShifts(result.shifts.map((shift, index) => ({ ...shift, id: shift.id || `${shift.date}-${index}`, selected: true })));
       setStage("review");
@@ -323,11 +267,11 @@ export default function Home() {
   }
 
   async function connectGoogle(): Promise<GoogleConnection | null> {
-    if (!GOOGLE_CLIENT_ID) {
-      setNotice("Google Calendar needs a Google OAuth web client ID before it can connect.");
+    if (!googleClientId) {
+      setNotice("Google Calendar setup is incomplete. Add the Google OAuth web client ID to the private hosting settings.");
       return null;
     }
-    if (!GOOGLE_CLIENT_ID || !window.google) {
+    if (!window.google) {
       setNotice("Google's account chooser is still loading. Try again in a moment.");
       return null;
     }
@@ -335,7 +279,7 @@ export default function Home() {
     setNotice("Connecting to Google Calendar…");
     return new Promise((resolve) => {
       const tokenClient = window.google!.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
+        client_id: googleClientId,
         scope: "openid email https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
         callback: async (token) => {
           if (!token.access_token) {
@@ -428,7 +372,7 @@ export default function Home() {
         <a className="brand" href="#" aria-label="Shiftly home"><span className="brand-mark">S</span> Shiftly</a>
         <div className="header-actions">
           <div className="header-note"><span className="pulse" /> Photos stay private</div>
-          <button className={`google-connect ${googleConnection ? "connected" : ""}`} onClick={connectGoogle} disabled={googleConnecting || (!googleReady && Boolean(GOOGLE_CLIENT_ID))}>
+          <button className={`google-connect ${googleConnection ? "connected" : ""}`} onClick={connectGoogle} disabled={googleConnecting || (!googleReady && Boolean(googleClientId))}>
             <span className="google-g">G</span>
             {googleConnecting ? "Connecting…" : googleConnection ? googleConnection.email : "Connect Google"}
           </button>
@@ -498,45 +442,6 @@ export default function Home() {
             </button>
             <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" capture="environment" onChange={handleFile} />
             {notice && <p className="notice">{notice}</p>}
-            <div className="api-key-panel">
-              <div className="api-key-copy">
-                <b>Choose timetable AI</b>
-                <span>{selectedProvider.hint} Keys stay only in this browser tab and are never saved.</span>
-                <a href={selectedProvider.keyUrl} target="_blank" rel="noreferrer">Get a {selectedProvider.label} key ↗</a>
-              </div>
-              <div className="api-key-controls">
-                <label className="api-provider-field">
-                  <span>AI provider</span>
-                  <select
-                    value={aiProvider}
-                    onChange={(event) => {
-                      setAiProvider(event.target.value as AiProvider);
-                      setAiApiKey("");
-                      setShowAiApiKey(false);
-                      setNotice("");
-                    }}
-                  >
-                    {(Object.entries(AI_PROVIDERS) as Array<[AiProvider, typeof AI_PROVIDERS[AiProvider]]>).map(([value, provider]) => (
-                      <option key={value} value={value}>{provider.optionLabel}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="api-key-field">
-                  <span>{providerHasHostedKey ? "API key (optional)" : "API key"}</span>
-                  <div>
-                    <input
-                      type={showAiApiKey ? "text" : "password"}
-                      value={aiApiKey}
-                      onChange={(event) => setAiApiKey(event.target.value)}
-                      placeholder={providerHasHostedKey ? "Using private hosted key" : selectedProvider.placeholder}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <button type="button" onClick={() => setShowAiApiKey((current) => !current)}>{showAiApiKey ? "Hide" : "Show"}</button>
-                  </div>
-                </label>
-              </div>
-            </div>
             <button className="primary wide" disabled={stage === "reading"} onClick={analyse}>
               {stage === "reading" ? <><span className="spinner" /> Reading your timetable…</> : <>Find my shifts <span>→</span></>}
             </button>

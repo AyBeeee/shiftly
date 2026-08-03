@@ -3,11 +3,8 @@ import { NextResponse } from "next/server";
 export async function GET() {
   return NextResponse.json(
     {
-      configuredProviders: {
-        gemini: Boolean(process.env.GEMINI_API_KEY),
-        openrouter: Boolean(process.env.OPENROUTER_API_KEY),
-        openai: Boolean(process.env.OPENAI_API_KEY),
-      },
+      openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      googleClientId: process.env.GOOGLE_CLIENT_ID ?? process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "",
     },
     { headers: { "Cache-Control": "no-store" } },
   );
