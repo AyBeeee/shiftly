@@ -29,13 +29,6 @@ declare global {
   }
 }
 
-const DEMO_SHIFTS: Shift[] = [
-  { id: "mon", day: "Monday", date: "2026-08-03", start: "09:00", end: "17:00", title: "Work", confidence: "high", selected: true },
-  { id: "tue", day: "Tuesday", date: "2026-08-04", start: "10:00", end: "18:00", title: "Work", confidence: "high", selected: true },
-  { id: "thu", day: "Thursday", date: "2026-08-06", start: "08:30", end: "16:30", title: "Work", confidence: "low", selected: true },
-  { id: "fri", day: "Friday", date: "2026-08-07", start: "12:00", end: "20:00", title: "Work", confidence: "high", selected: true },
-];
-
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 
 function formatDate(date: string) {
@@ -61,12 +54,17 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setName(localStorage.getItem("shiftly-name") ?? "");
+    const restoreName = window.setTimeout(() => {
+      setName(localStorage.getItem("shiftly-name") ?? "");
+    }, 0);
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
     document.head.appendChild(script);
-    return () => script.remove();
+    return () => {
+      window.clearTimeout(restoreName);
+      script.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -252,7 +250,7 @@ export default function Home() {
         ) : (
           <section className="upload-panel">
             <div className="form-row">
-              <label className="name-field"><span>Your name on the timetable</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Abdullah Baig" autoComplete="name" /></label>
+              <label className="name-field"><span>Your name on the timetable</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. John Doe" autoComplete="name" /></label>
               <span className="saved">Saved on this device</span>
             </div>
             <button
@@ -262,6 +260,8 @@ export default function Home() {
               onDragLeave={() => setDragging(false)}
               onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0]); }}
             >
+              {/* Blob previews are local-only and cannot use the framework image optimizer. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               {preview ? <img src={preview} alt="Selected timetable" /> : <div className="camera">⌁</div>}
               <div><b>{file ? file.name : "Take or choose a photo"}</b><span>{file ? "Tap to replace it" : "Make sure the full table and day headers are visible"}</span></div>
             </button>

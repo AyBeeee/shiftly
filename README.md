@@ -1,100 +1,128 @@
-# vinext-starter
+# Shiftly
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Shiftly turns a photo of a weekly paper work timetable into editable calendar events. It finds the employee row by name, reads each day column, highlights uncertain values, and adds approved shifts to a Google Calendar named **Work**.
 
-## Prerequisites
+![Shiftly social preview](public/og.png)
 
-- Node.js `>=22.13.0`
+## What it does
 
-## Quick Start
+- Captures or uploads a timetable photo on mobile and desktop.
+- Uses the employee name to locate the correct row.
+- Extracts dates and start/end times column by column.
+- Flags uncertain cells instead of silently guessing.
+- Lets the user edit, select, or remove shifts before syncing.
+- Finds a Google Calendar named `Work` and inserts approved events.
+- Skips events previously created by Shiftly.
+- Exports an `.ics` calendar file when Google Calendar is not connected.
+- Processes images in memory and does not persist timetable photos.
 
-```bash
-npm install
-npm run dev
-npm run build
+## Technology
+
+- Next.js-compatible app running on [vinext](https://github.com/cloudflare/vinext)
+- React 19 and TypeScript
+- OpenAI Responses API with `gpt-5.6-luna`
+- Google Identity Services and Google Calendar API
+- Cloudflare-compatible Sites deployment
+
+The timetable reader uses Luna with `reasoning.effort: "none"` to minimize reasoning-token use and latency. Dense timetable images are still sent at high image detail so small text remains legible.
+
+## Requirements
+
+- Node.js 22.13 or newer
+- An OpenAI API key
+- A Google Cloud OAuth 2.0 web client with Google Calendar API enabled
+
+## Local setup
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Copy the safe environment template:
+
+   ```bash
+   cp .env.example .env.local
+   ```
+
+3. Add your private values to `.env.local`:
+
+   ```env
+   OPENAI_API_KEY=your_openai_api_key
+   NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_oauth_web_client_id
+   ```
+
+4. Start the app:
+
+   ```bash
+   npm run dev
+   ```
+
+The local URL is printed in the terminal. If `OPENAI_API_KEY` is absent, the app deliberately returns demonstration shifts so the review interface can still be tested.
+
+## Google Calendar setup
+
+1. Create or choose a Google Cloud project.
+2. Enable the **Google Calendar API**.
+3. Configure the OAuth consent screen.
+4. Create an **OAuth client ID** for a web application.
+5. Add the app's local and deployed origins to **Authorized JavaScript origins**.
+6. Put the client ID—not the client secret—in `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
+7. In Google Calendar, create a calendar named exactly **Work**.
+
+Shiftly requests permission only when the user presses **Add to Google Calendar**. It searches for the `Work` calendar and uses a private event property to prevent duplicate imports.
+
+## Privacy and secrets
+
+- Timetable images are submitted directly to the analysis route and are not written to disk or a database.
+- `OPENAI_API_KEY` is read only on the server.
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is intentionally public; OAuth web client IDs are identifiers, not secrets.
+- Real environment files (`.env`, `.env.local`, and variants) are ignored by Git.
+- `.env.example` contains variable names only and is safe to commit.
+- Never add a Google OAuth client secret to this browser-based flow.
+
+Before publishing a fork, review the photo-retention and data-processing terms of every service you configure.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the local development server |
+| `npm run build` | Create and validate the production build |
+| `npm run lint` | Run ESLint |
+| `npm test` | Build and run the rendered HTML test |
+
+## Project layout
+
+```text
+app/
+├── api/analyze/route.ts  # Secure image-analysis endpoint
+├── globals.css           # Responsive visual system
+├── layout.tsx            # Metadata and social preview
+└── page.tsx              # Photo, review, export, and calendar UI
+public/
+└── og.png                # Social sharing image
+.openai/hosting.json      # Sites deployment metadata
+.env.example              # Safe environment variable template
 ```
 
-This starter does not use `wrangler.jsonc`.
+## Production checklist
 
-## Included Shape
+- Set `OPENAI_API_KEY` as a server-side secret.
+- Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` as a build/runtime variable.
+- Add the production origin to the Google OAuth client.
+- Keep the repository private if it contains internal operational context.
+- Run `npm run build` before deployment.
+- Test one clear timetable and one deliberately blurry timetable before regular use.
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Current limitations
 
-## Workspace Auth Headers
+- The paper must show the full header row and the employee name column.
+- The employee name should closely match the printed timetable name.
+- The destination calendar must be named `Work`.
+- Low-effort Luna minimizes cost, but unusual layouts may need manual corrections in the review screen.
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+## License
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+Private project. No license is granted for redistribution.

@@ -45,8 +45,8 @@ export async function POST(request: Request) {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-5.6-terra",
-      reasoning: { effort: "low" },
+      model: "gpt-5.6-luna",
+      reasoning: { effort: "none" },
       input: [{ role: "user", content: [
         { type: "input_text", text: `Today is ${today}. Read this weekly staff timetable. Find the row whose employee name best matches “${name}”. Read that row column by column, using the dates or weekdays in the top header. Return only working shifts, not days off or blank cells. Convert dates to YYYY-MM-DD and times to 24-hour HH:MM. If a date has no year, choose the occurrence closest to today that preserves the pictured weekday. Use title “Work”. Mark confidence low whenever the name, date, or either time is unclear. Never guess an unreadable time.` },
         { type: "input_image", image_url: dataUrl, detail: "high" },
