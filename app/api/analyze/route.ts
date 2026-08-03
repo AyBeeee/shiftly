@@ -3,13 +3,6 @@ import { NextResponse } from "next/server";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
-const demoShifts = [
-  { id: "mon", day: "Monday", date: "2026-08-03", start: "09:00", end: "17:00", title: "Work", confidence: "high" },
-  { id: "tue", day: "Tuesday", date: "2026-08-04", start: "10:00", end: "18:00", title: "Work", confidence: "high" },
-  { id: "thu", day: "Thursday", date: "2026-08-06", start: "08:30", end: "16:30", title: "Work", confidence: "low" },
-  { id: "fri", day: "Friday", date: "2026-08-07", start: "12:00", end: "20:00", title: "Work", confidence: "high" },
-];
-
 export async function POST(request: Request) {
   let form: FormData;
   try {
@@ -24,7 +17,7 @@ export async function POST(request: Request) {
   if (image.size > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Please use an image smaller than 10 MB." }, { status: 413 });
 
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return NextResponse.json({ shifts: demoShifts, demo: true });
+  if (!apiKey) return NextResponse.json({ error: "Real timetable reading is not configured yet. Add the private OpenAI API key in the deployment settings." }, { status: 503 });
 
   const bytes = Buffer.from(await image.arrayBuffer());
   const dataUrl = `data:${image.type || "image/jpeg"};base64,${bytes.toString("base64")}`;
@@ -69,7 +62,7 @@ export async function POST(request: Request) {
   const outputText = result.output_text ?? result.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text;
   if (!outputText) return NextResponse.json({ error: "No shifts were found for that name." }, { status: 422 });
   try {
-    const parsed = JSON.parse(outputText) as { shifts: typeof demoShifts };
+    const parsed = JSON.parse(outputText) as { shifts: Array<{ id: string; day: string; date: string; start: string; end: string; title: string; confidence: "high" | "low" }> };
     return NextResponse.json({ shifts: parsed.shifts });
   } catch {
     return NextResponse.json({ error: "The timetable result could not be read." }, { status: 502 });

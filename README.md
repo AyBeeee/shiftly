@@ -6,7 +6,7 @@ Shiftly finds an employee by name, reads their row across the weekly columns, co
 
 ![Shiftly — timetable photo to calendar events](public/og.png)
 
-> Status: private early release. The interface and deployment are working; real timetable extraction and Google Calendar sync require the two environment values described below.
+> Status: private early release. The interface and deployment are working; real timetable extraction and Google Calendar sync require the two environment values described below. Shiftly never substitutes sample shifts when real analysis is unavailable.
 
 ## Contents
 
@@ -50,7 +50,7 @@ Nothing is written to Google Calendar before the final confirmation button is pr
 - Duplicate protection using private Google Calendar event properties
 - `.ics` calendar export
 - Responsive, keyboard-accessible review flow
-- Demonstration mode when no OpenAI API key is configured
+- Fail-closed configuration errors instead of fabricated demo shifts
 
 ## Architecture
 
@@ -131,7 +131,7 @@ The active request uses:
 
 High image detail is intentional because timetable cells often contain small text. Low reasoning effort keeps usage modest while still allowing the model to follow row and column relationships.
 
-If `OPENAI_API_KEY` is missing, `/api/analyze` returns demonstration shifts. This makes the review interface testable but does **not** analyze the uploaded timetable.
+If `OPENAI_API_KEY` is missing, `/api/analyze` returns a clear configuration error and no shifts. It never substitutes sample events for an uploaded timetable.
 
 ## Google Calendar setup
 
@@ -253,7 +253,7 @@ Review the data-processing and retention settings of the OpenAI and Google proje
 
 | Message or symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `Preview mode is on` | `OPENAI_API_KEY` is missing | Add the key and restart or redeploy |
+| Real timetable reading is not configured | `OPENAI_API_KEY` is missing | Add the key as a private hosted secret, then redeploy |
 | `Google Calendar needs a Google OAuth web client ID` | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is missing | Add the client ID and rebuild/redeploy |
 | Google popup reports an origin error | Current origin is not authorized | Add the exact scheme, host, and port to Authorized JavaScript origins |
 | Google consent blocks the user | OAuth app is in testing and the account is not allowed | Add the account as an OAuth test user or publish the consent app |
@@ -274,7 +274,6 @@ Review the data-processing and retention settings of the OpenAI and Google proje
 - Overnight shifts are not yet modeled across two dates.
 - Access tokens are not refreshed in the background.
 - Unusual layouts, handwriting, glare, blur, or perspective distortion may require manual corrections.
-- Demo mode uses fixed sample shifts and must not be mistaken for real extraction.
 - Automated Shiftly-specific test coverage has not yet replaced the starter test.
 
 ## Repository policy

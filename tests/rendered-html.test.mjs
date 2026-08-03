@@ -33,12 +33,25 @@ test("server-renders the Shiftly application", async () => {
   assert.doesNotMatch(html, /codex-preview/);
 });
 
-test("analysis endpoint validates size before demo mode", async () => {
+test("analysis endpoint validates size before checking configuration", async () => {
   const route = await readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8");
   const sizeValidation = route.indexOf("image.size > MAX_IMAGE_BYTES");
-  const demoMode = route.indexOf("const apiKey = process.env.OPENAI_API_KEY");
+  const configurationCheck = route.indexOf("const apiKey = process.env.OPENAI_API_KEY");
   assert.ok(sizeValidation > 0);
-  assert.ok(demoMode > sizeValidation);
+  assert.ok(configurationCheck > sizeValidation);
+  assert.doesNotMatch(route, /demoShifts|demo:\s*true/);
+});
+
+test("analysis endpoint fails closed when AI is not configured", async () => {
+  const form = new FormData();
+  form.set("name", "Baig, Abdullah");
+  form.set("image", new File(["small timetable"], "timetable.jpg", { type: "image/jpeg" }));
+
+  const response = await request("/api/analyze", { method: "POST", body: form });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: "Real timetable reading is not configured yet. Add the private OpenAI API key in the deployment settings.",
+  });
 });
 
 test("analysis endpoint rejects unsupported image types", async () => {

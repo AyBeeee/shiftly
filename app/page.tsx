@@ -44,7 +44,6 @@ const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", 
 type AnalysisResult = {
   shifts?: Shift[];
   error?: string;
-  demo?: boolean;
 };
 
 function formatDate(date: string) {
@@ -214,7 +213,6 @@ export default function Home() {
       if (!response.ok || !result.shifts) throw new Error(result.error || "We couldn't read this timetable.");
       setShifts(result.shifts.map((shift, index) => ({ ...shift, id: shift.id || `${shift.date}-${index}`, selected: true })));
       setStage("review");
-      if (result.demo) setNotice("Preview mode is on. Connect an OpenAI key to read your real timetable.");
     } catch (error) {
       setStage("upload");
       setNotice(error instanceof Error ? error.message : "We couldn't read this timetable.");
