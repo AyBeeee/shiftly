@@ -134,6 +134,14 @@ test("calendar export and Google sync use the next day for overnight shift ends"
   assert.match(page, /end: \{ dateTime: shiftEndTimestamp\(shift\), timeZone:/);
 });
 
+test("Google sync uses a selected calendar instead of a fixed Work calendar", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /selectedCalendarId/);
+  assert.match(page, /normalizeGoogleCalendars/);
+  assert.match(page, /Add to selected calendar/);
+  assert.doesNotMatch(page, /workCalendarId|named .Work|Add to Work|Connect & add to Work/);
+});
+
 function analysisForm() {
   const form = new FormData();
   form.set("name", "Baig, Abdullah");

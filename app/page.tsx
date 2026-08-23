@@ -14,10 +14,17 @@ type Shift = {
   selected: boolean;
 };
 
+type GoogleCalendar = {
+  id: string;
+  summary: string;
+  primary?: boolean;
+};
+
 type GoogleConnection = {
   accessToken: string;
   email: string;
-  workCalendarId: string | null;
+  calendars: GoogleCalendar[];
+  selectedCalendarId: string;
 };
 
 declare global {
@@ -169,6 +176,8 @@ export default function Home() {
   const selectedShifts = useMemo(() => shifts.filter((shift) => shift.selected), [shifts]);
   const selectedCount = selectedShifts.length;
   const totalHours = useMemo(() => selectedShifts.reduce((total, shift) => total + Math.max(0, shiftDurationHours(shift)), 0), [selectedShifts]);
+  const selectedGoogleCalendar = googleConnection?.calendars.find((calendar) => calendar.id === googleConnection.selectedCalendarId);
+  const selectedGoogleCalendarName = selectedGoogleCalendar?.summary ?? "Default calendar";
 
   function chooseFile(nextFile?: File) {
     if (!nextFile) return;
@@ -293,17 +302,17 @@ export default function Home() {
             ]);
             if (!profileResponse.ok || !calendarsResponse.ok) throw new Error("Google did not grant the required Calendar access.");
             const profile = await profileResponse.json() as { email?: string };
-            const calendars = await calendarsResponse.json() as { items?: Array<{ id: string; summary: string }> };
-            const workCalendar = calendars.items?.find((calendar) => calendar.summary.trim().toLowerCase() === "work");
+            const calendars = await calendarsResponse.json() as { items?: Array<{ id: string; summary: string; primary?: boolean }> };
+            const writableCalendars = normalizeGoogleCalendars(calendars.items ?? []);
+            const primaryCalendar = writableCalendars.find((calendar) => calendar.primary) ?? writableCalendars[0];
             const connection = {
               accessToken: token.access_token,
               email: profile.email || "Google account",
-              workCalendarId: workCalendar?.id ?? null,
+              calendars: writableCalendars,
+              selectedCalendarId: primaryCalendar?.id ?? "primary",
             };
             setGoogleConnection(connection);
-            setNotice(workCalendar
-              ? `Connected ${connection.email} to the Work calendar.`
-              : `Connected ${connection.email}, but no writable calendar named “Work” was found.`);
+            setNotice(`Connected ${connection.email}. Shifts will go to ${primaryCalendar?.summary ?? "the default calendar"}.`);
             resolve(connection);
           } catch (error) {
             setNotice(error instanceof Error ? error.message : "Google Calendar connection failed.");
@@ -324,11 +333,10 @@ export default function Home() {
     }
     const connection = googleConnection ?? await connectGoogle();
     if (!connection) return;
-    if (!connection.workCalendarId) {
-      setNotice(`Create a writable Google calendar named “Work” in ${connection.email}, then reconnect.`);
-      return;
-    }
-    setNotice(`Adding shifts to ${connection.email} · Work…`);
+    const calendar = connection.calendars.find((item) => item.id === connection.selectedCalendarId);
+    const calendarId = calendar?.id ?? "primary";
+    const calendarName = calendar?.summary ?? "Default calendar";
+    setNotice(`Adding shifts to ${connection.email} · ${calendarName}…`);
     try {
       const headers = { Authorization: `Bearer ${connection.accessToken}`, "Content-Type": "application/json" };
       for (const shift of selectedShifts) {
@@ -339,7 +347,7 @@ export default function Home() {
           privateExtendedProperty: `shiftlyKey=${duplicateKey}`,
           singleEvents: "true",
         });
-        const calendarUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(connection.workCalendarId)}/events`;
+        const calendarUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
         const existingResponse = await fetch(`${calendarUrl}?${query}`, { headers });
         if (existingResponse.status === 401) {
           setGoogleConnection(null);
@@ -367,6 +375,10 @@ export default function Home() {
     }
   }
 
+  function updateSelectedCalendar(calendarId: string) {
+    setGoogleConnection((connection) => connection ? { ...connection, selectedCalendarId: calendarId } : connection);
+  }
+
   return (
     <main>
       <header className="topbar">
@@ -384,14 +396,14 @@ export default function Home() {
         <div className="intro">
           <p className="eyebrow">YOUR PAPER ROTA, SORTED</p>
           <h1>{stage === "review" ? "Check your week." : stage === "done" ? "Week sorted." : "Snap it. Shift it."}</h1>
-          <p className="lede">{stage === "review" ? "We found your row. Fix anything that looks off, then send the selected shifts to Work." : stage === "done" ? "Your selected shifts are now in your Work calendar." : "Turn the weekly timetable photo into clean Google Calendar events—in under a minute."}</p>
+          <p className="lede">{stage === "review" ? "We found your row. Fix anything that looks off, then send the selected shifts to your calendar." : stage === "done" ? "Your selected shifts are now in Google Calendar." : "Turn the weekly timetable photo into clean Google Calendar events—in under a minute."}</p>
         </div>
 
         {stage === "done" ? (
           <section className="success-card">
             <div className="success-icon">✓</div>
             <h2>{selectedCount} shifts added</h2>
-            <p>Google Calendar · Work</p>
+            <p>Google Calendar · {selectedGoogleCalendarName}</p>
             <button className="primary" onClick={reset}>Add next week</button>
           </section>
         ) : stage === "review" ? (
@@ -401,8 +413,18 @@ export default function Home() {
               <button className="text-button" onClick={reset}>Use another photo</button>
             </div>
             <div className="summary-strip">
-              <span><b>{selectedCount}</b> shifts</span><span><b>{totalHours}</b> hours</span><span className="calendar-chip"><i /> {googleConnection ? `${googleConnection.email} · Work` : "Google not connected"}</span>
+              <span><b>{selectedCount}</b> shifts</span><span><b>{totalHours}</b> hours</span><span className="calendar-chip"><i /> {googleConnection ? `${googleConnection.email} · ${selectedGoogleCalendarName}` : "Google not connected"}</span>
             </div>
+            {googleConnection && (
+              <label className="calendar-field">
+                <span>Calendar</span>
+                <select value={googleConnection.selectedCalendarId} onChange={(event) => updateSelectedCalendar(event.target.value)}>
+                  {googleConnection.calendars.map((calendar) => (
+                    <option key={calendar.id} value={calendar.id}>{calendar.summary}{calendar.primary ? " (default)" : ""}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="shift-list">
               {shifts.map((shift) => (
                 <article className={`shift-card ${shift.confidence === "low" ? "uncertain" : ""}`} key={shift.id}>
@@ -419,9 +441,9 @@ export default function Home() {
             {notice && <p className="notice">{notice}</p>}
             <div className="actions">
               <button className="secondary" disabled={!selectedCount} onClick={exportIcs}>Download calendar file</button>
-              <button className="primary" disabled={!selectedCount || googleConnecting} onClick={syncWithGoogle}>{googleConnection ? "Add to Work calendar" : "Connect & add to Work"} <span>→</span></button>
+              <button className="primary" disabled={!selectedCount || googleConnecting} onClick={syncWithGoogle}>{googleConnection ? "Add to selected calendar" : "Connect & add to calendar"} <span>→</span></button>
             </div>
-            <p className="fine-print">Google’s account chooser decides whose calendar is used. Duplicates are skipped automatically.</p>
+            <p className="fine-print">Google’s account chooser decides whose calendars are shown. Duplicates are skipped automatically.</p>
           </section>
         ) : (
           <section className="upload-panel">
@@ -453,10 +475,25 @@ export default function Home() {
         <section className="how-it-works">
           <div><span>01</span><b>Take a clear photo</b><p>Fit the full weekly table in frame.</p></div>
           <div><span>02</span><b>We find your row</b><p>Dates and times are read column by column.</p></div>
-          <div><span>03</span><b>You approve</b><p>Only checked shifts go to Work.</p></div>
+          <div><span>03</span><b>You approve</b><p>Only checked shifts go to the calendar you choose.</p></div>
         </section>
       </section>
       <footer>Built for weekly rotas · Your timetable photo is processed once and not saved</footer>
     </main>
   );
+}
+
+function normalizeGoogleCalendars(calendars: GoogleCalendar[]) {
+  const writableCalendars = calendars.map((calendar) => {
+    const summary = calendar.summary.trim() || (calendar.primary ? "Default calendar" : "Untitled calendar");
+    return {
+      id: calendar.primary ? "primary" : calendar.id,
+      summary,
+      primary: calendar.primary,
+    };
+  });
+  if (!writableCalendars.some((calendar) => calendar.primary)) {
+    return [{ id: "primary", summary: "Default calendar", primary: true }, ...writableCalendars];
+  }
+  return writableCalendars;
 }

@@ -2,7 +2,7 @@
 
 Turn a photo of a weekly paper work timetable into reviewed Google Calendar shifts.
 
-Shiftly finds an employee by name, reads their row across the weekly columns, converts the detected times into editable events, and adds approved shifts to a writable Google Calendar named **Work**.
+Shiftly finds an employee by name, reads their row across the weekly columns, converts the detected times into editable events, and adds approved shifts to the user's chosen Google Calendar.
 
 ![Shiftly — timetable photo to calendar events](public/og.png)
 
@@ -32,7 +32,8 @@ Shiftly finds an employee by name, reads their row across the weekly columns, co
 4. Review the extracted dates and times. Low-confidence cells are highlighted.
 5. Select, edit, or remove shifts before continuing.
 6. Choose a Google account through Google's account chooser.
-7. Add the selected events to that account's writable `Work` calendar.
+7. Choose a writable calendar or use the account's default calendar.
+8. Add the selected events to that calendar.
 
 Nothing is written to Google Calendar before the final confirmation button is pressed. An `.ics` download is available when Google Calendar is not connected.
 
@@ -47,7 +48,7 @@ Nothing is written to Google Calendar before the final confirmation button is pr
 - Editable start and end times
 - Low-confidence warnings instead of silent guessing
 - Google account chooser with the connected email shown in the UI
-- Writable `Work` calendar discovery
+- Writable calendar selection with default-calendar fallback
 - Duplicate protection using private Google Calendar event properties
 - `.ics` calendar export
 - Responsive, keyboard-accessible review flow
@@ -62,7 +63,7 @@ flowchart LR
     C --> D["Strict shift JSON"]
     D --> E["Editable review screen"]
     E --> F["Google OAuth account chooser"]
-    F --> G["CalendarList: writable Work calendar"]
+    F --> G["CalendarList: writable calendars"]
     G --> H["Events: duplicate check + insert"]
     E --> I["ICS download"]
 ```
@@ -89,7 +90,6 @@ The browser accepts JPEG, PNG, and WebP images up to 50 MB. Files larger than 3 
 - A Google Cloud project
 - Google Calendar API enabled in that project
 - A Google OAuth 2.0 web client ID
-- A Google Calendar named exactly `Work`
 
 ## Local setup
 
@@ -154,14 +154,9 @@ If the local server chooses another port, add the exact origin it prints. This t
 
 Copy the OAuth **client ID** into the hosted `GOOGLE_CLIENT_ID` value. Do not create or add a client secret to the browser application.
 
-### 4. Create the destination calendar
+### 4. Choose the destination calendar
 
-In the Google account that will receive shifts:
-
-1. Open Google Calendar.
-2. Create a new calendar.
-3. Name it exactly `Work`.
-4. Ensure the connected account has write access.
+Shiftly defaults to the selected Google account's primary calendar. After connecting Google, the review screen also shows writable calendars from that account so the user can choose a different destination before adding shifts.
 
 ### How Shiftly chooses the account
 
@@ -169,9 +164,10 @@ In the Google account that will receive shifts:
 
 1. Display the selected account email.
 2. Request that user's calendar list with a minimum access role of `writer`.
-3. Find the writable calendar whose name equals `Work`.
-4. Check for existing Shiftly events.
-5. Insert the approved events.
+3. Load writable calendars for the account.
+4. Default to the primary calendar unless the user chooses another calendar.
+5. Check for existing Shiftly events in the selected calendar.
+6. Insert the approved events.
 
 The token is held in memory only. Reloading the page or token expiration requires reconnecting.
 
@@ -245,7 +241,7 @@ Review the data-processing and retention settings of OpenAI and Google before us
 | Google Calendar setup is incomplete | `GOOGLE_CLIENT_ID` is missing | Add the OAuth web client ID to hosting settings and redeploy |
 | Google popup reports an origin error | Current origin is not authorized | Add the exact scheme, host, and port to Authorized JavaScript origins |
 | Google consent blocks the user | OAuth app is in testing and the account is not allowed | Add the account as an OAuth test user or publish the consent app |
-| No writable calendar named `Work` | Calendar is missing, differently named, or read-only | Create `Work` or grant the selected account write access, then reconnect |
+| Expected calendar is missing from the picker | The selected account does not have write access to it | Grant the account write access or choose the default calendar |
 | Google session expired | Short-lived access token expired | Press **Connect Google** and retry |
 | No shifts found | Name mismatch or unreadable image | Use the printed name and retake the photo with the full table visible |
 | Photo is too large | The original exceeds 50 MB or remains oversized after optimization | Crop closer to the timetable, then choose the photo again |
@@ -259,8 +255,8 @@ Review the data-processing and retention settings of OpenAI and Google before us
 - Employee matching works best with the exact printed name.
 - Only one timetable image is analyzed per import.
 - OpenAI quotas, model availability, latency, and extraction quality can vary.
-- The destination calendar name is fixed to `Work`.
-- Overnight shifts are not yet modeled across two dates.
+- The destination calendar must be writable by the selected Google account.
+- Overnight shifts are modeled by ending on the following calendar date.
 - Access tokens are not refreshed in the background.
 - Unusual layouts, handwriting, glare, blur, or perspective distortion may require manual corrections.
 - Provider extraction still requires human review before calendar insertion.
