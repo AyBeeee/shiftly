@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isDateString, isTimeString, shiftDurationHours } from "../../calendar";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -42,7 +43,21 @@ function parseShiftResult(outputText: string) {
   const cleaned = outputText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
   const parsed = JSON.parse(cleaned) as ShiftResult;
   if (!Array.isArray(parsed.shifts)) throw new Error("Missing shifts");
+  for (const shift of parsed.shifts) {
+    if (!shift || typeof shift !== "object") throw new Error("Invalid shift");
+    if (!isNonEmptyString(shift.id)) throw new Error("Invalid shift id");
+    if (!isNonEmptyString(shift.day)) throw new Error("Invalid shift day");
+    if (!isDateString(shift.date)) throw new Error("Invalid shift date");
+    if (!isTimeString(shift.start) || !isTimeString(shift.end)) throw new Error("Invalid shift time");
+    if (!Number.isFinite(shiftDurationHours(shift)) || shiftDurationHours(shift) <= 0) throw new Error("Invalid shift duration");
+    if (!isNonEmptyString(shift.title)) throw new Error("Invalid shift title");
+    if (shift.confidence !== "high" && shift.confidence !== "low") throw new Error("Invalid shift confidence");
+  }
   return parsed;
+}
+
+function isNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 export async function POST(request: Request) {

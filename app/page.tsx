@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { calendarTimestamp, compactIcsTimestamp, shiftDurationHours, shiftEndDate, shiftEndTimestamp, shiftStartTimestamp } from "./calendar";
 
 type Shift = {
   id: string;
@@ -48,10 +49,6 @@ type AnalysisResult = {
 
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(`${date}T12:00:00`));
-}
-
-function calendarTimestamp(date: string, time: string) {
-  return `${date}T${time}:00`;
 }
 
 function escapeIcs(value: string) {
@@ -169,12 +166,9 @@ export default function Home() {
     if (name.trim()) localStorage.setItem("shiftly-name", name.trim());
   }, [name]);
 
-  const selectedCount = useMemo(() => shifts.filter((shift) => shift.selected).length, [shifts]);
-  const totalHours = useMemo(() => shifts.filter((shift) => shift.selected).reduce((total, shift) => {
-    const [sh, sm] = shift.start.split(":").map(Number);
-    const [eh, em] = shift.end.split(":").map(Number);
-    return total + Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60);
-  }, 0), [shifts]);
+  const selectedShifts = useMemo(() => shifts.filter((shift) => shift.selected), [shifts]);
+  const selectedCount = selectedShifts.length;
+  const totalHours = useMemo(() => selectedShifts.reduce((total, shift) => total + Math.max(0, shiftDurationHours(shift)), 0), [selectedShifts]);
 
   function chooseFile(nextFile?: File) {
     if (!nextFile) return;
@@ -248,13 +242,16 @@ export default function Home() {
   }
 
   function exportIcs() {
-    const chosen = shifts.filter((shift) => shift.selected);
-    const body = chosen.map((shift) => [
+    if (selectedShifts.some((shift) => shiftDurationHours(shift) <= 0)) {
+      setNotice("Each selected shift needs different start and end times.");
+      return;
+    }
+    const body = selectedShifts.map((shift) => [
       "BEGIN:VEVENT",
       `UID:shiftly-${shift.date}-${shift.start.replace(":", "")}@shiftly`,
       `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`,
-      `DTSTART:${shift.date.replace(/-/g, "")}T${shift.start.replace(":", "")}00`,
-      `DTEND:${shift.date.replace(/-/g, "")}T${shift.end.replace(":", "")}00`,
+      `DTSTART:${compactIcsTimestamp(shift.date, shift.start)}`,
+      `DTEND:${compactIcsTimestamp(shiftEndDate(shift), shift.end)}`,
       `SUMMARY:${escapeIcs(shift.title || "Work")}`,
       "END:VEVENT",
     ].join("\r\n")).join("\r\n");
@@ -321,6 +318,10 @@ export default function Home() {
   }
 
   async function syncWithGoogle() {
+    if (selectedShifts.some((shift) => shiftDurationHours(shift) <= 0)) {
+      setNotice("Each selected shift needs different start and end times.");
+      return;
+    }
     const connection = googleConnection ?? await connectGoogle();
     if (!connection) return;
     if (!connection.workCalendarId) {
@@ -330,11 +331,11 @@ export default function Home() {
     setNotice(`Adding shifts to ${connection.email} · Work…`);
     try {
       const headers = { Authorization: `Bearer ${connection.accessToken}`, "Content-Type": "application/json" };
-      for (const shift of shifts.filter((item) => item.selected)) {
+      for (const shift of selectedShifts) {
         const duplicateKey = `shiftly-${shift.date}-${shift.start}`;
         const query = new URLSearchParams({
           timeMin: new Date(calendarTimestamp(shift.date, "00:00")).toISOString(),
-          timeMax: new Date(calendarTimestamp(shift.date, "23:59")).toISOString(),
+          timeMax: new Date(calendarTimestamp(shiftEndDate(shift), "23:59")).toISOString(),
           privateExtendedProperty: `shiftlyKey=${duplicateKey}`,
           singleEvents: "true",
         });
@@ -352,8 +353,8 @@ export default function Home() {
           headers,
           body: JSON.stringify({
             summary: shift.title || "Work",
-            start: { dateTime: calendarTimestamp(shift.date, shift.start), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
-            end: { dateTime: calendarTimestamp(shift.date, shift.end), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+            start: { dateTime: shiftStartTimestamp(shift), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+            end: { dateTime: shiftEndTimestamp(shift), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
             extendedProperties: { private: { shiftlyKey: duplicateKey } },
           }),
         });

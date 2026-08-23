@@ -72,3 +72,91 @@ test("analysis endpoint rejects unsupported image types", async () => {
   assert.equal(response.status, 415);
   assert.deepEqual(await response.json(), { error: "Use a JPEG, PNG, or WebP image." });
 });
+
+test("analysis endpoint rejects malformed AI shift output", async () => {
+  await withMockOpenAiResponse({
+    shifts: [{
+      id: "bad-time",
+      day: "Monday",
+      date: "2026-02-30",
+      start: "25:00",
+      end: "17:00",
+      title: "Work",
+      confidence: "high",
+    }],
+  }, async () => {
+    const response = await request("/api/analyze", { method: "POST", body: analysisForm() });
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "OpenAI returned a timetable result that could not be read. Try again." });
+  });
+});
+
+test("analysis endpoint rejects zero-duration shifts", async () => {
+  await withMockOpenAiResponse({
+    shifts: [{
+      id: "zero-duration",
+      day: "Monday",
+      date: "2026-08-24",
+      start: "09:00",
+      end: "09:00",
+      title: "Work",
+      confidence: "high",
+    }],
+  }, async () => {
+    const response = await request("/api/analyze", { method: "POST", body: analysisForm() });
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "OpenAI returned a timetable result that could not be read. Try again." });
+  });
+});
+
+test("analysis endpoint accepts overnight shifts", async () => {
+  const overnightShift = {
+    id: "fri-night",
+    day: "Friday",
+    date: "2026-08-28",
+    start: "22:00",
+    end: "06:00",
+    title: "Work",
+    confidence: "high",
+  };
+
+  await withMockOpenAiResponse({ shifts: [overnightShift] }, async () => {
+    const response = await request("/api/analyze", { method: "POST", body: analysisForm() });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { shifts: [overnightShift] });
+  });
+});
+
+test("calendar export and Google sync use the next day for overnight shift ends", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /DTEND:\$\{compactIcsTimestamp\(shiftEndDate\(shift\), shift\.end\)\}/);
+  assert.match(page, /timeMax: new Date\(calendarTimestamp\(shiftEndDate\(shift\), "23:59"\)\)\.toISOString\(\)/);
+  assert.match(page, /end: \{ dateTime: shiftEndTimestamp\(shift\), timeZone:/);
+});
+
+function analysisForm() {
+  const form = new FormData();
+  form.set("name", "Baig, Abdullah");
+  form.set("image", new File(["small timetable"], "timetable.jpg", { type: "image/jpeg" }));
+  return form;
+}
+
+async function withMockOpenAiResponse(body, callback) {
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "test-key";
+  globalThis.fetch = async (url) => {
+    assert.equal(String(url), "https://api.openai.com/v1/responses");
+    return Response.json({ output_text: JSON.stringify(body) });
+  };
+  try {
+    await callback();
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
+}
