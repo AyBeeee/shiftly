@@ -464,6 +464,15 @@ export default function Home() {
               <div><b>{file ? file.name : "Take or choose a photo"}</b><span>{file ? `${formatFileSize(file.size)} · ${file.size > MAX_UPLOAD_IMAGE_BYTES ? "optimized before upload" : "Tap to replace it"}` : "Make sure the full table and day headers are visible"}</span></div>
             </button>
             <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" capture="environment" onChange={handleFile} />
+            <div className="photo-checklist" aria-label="Photo quality checklist">
+              <p>Before reading</p>
+              <ul>
+                <li><span aria-hidden="true">✓</span> Full weekly table is visible</li>
+                <li><span aria-hidden="true">✓</span> Your name row is in frame</li>
+                <li><span aria-hidden="true">✓</span> Day and date headers are clear</li>
+                <li><span aria-hidden="true">✓</span> No glare, blur, or heavy shadows</li>
+              </ul>
+            </div>
             {notice && <p className="notice">{notice}</p>}
             <button className="primary wide" disabled={stage === "reading"} onClick={analyse}>
               {stage === "reading" ? <><span className="spinner" /> Reading your timetable…</> : <>Find my shifts <span>→</span></>}

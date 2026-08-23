@@ -30,6 +30,8 @@ test("server-renders the Shiftly application", async () => {
   assert.match(html, /<title>Shiftly/);
   assert.match(html, /Snap it\. Shift it\./);
   assert.match(html, /Your name on the timetable/);
+  assert.match(html, /Before reading/);
+  assert.match(html, /Full weekly table is visible/);
   assert.doesNotMatch(html, /AI provider|API key/);
   assert.doesNotMatch(html, /codex-preview/);
 });
