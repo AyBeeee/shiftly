@@ -75,6 +75,16 @@ test("analysis endpoint rejects unsupported image types", async () => {
   assert.deepEqual(await response.json(), { error: "Use a JPEG, PNG, or WebP image." });
 });
 
+test("the browser accepts HEIC and converts it to a PNG before upload", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /heic2any/);
+  assert.match(page, /toType: "image\/png"/);
+  assert.match(page, /multiple: true/);
+  assert.match(page, /\.heic/);
+  assert.match(page, /image\/heic/);
+  assert.match(page, /converted to PNG/);
+});
+
 test("analysis endpoint rejects malformed AI shift output", async () => {
   await withMockOpenAiResponse({
     shifts: [{
