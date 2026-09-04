@@ -47,6 +47,7 @@ const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_UPLOAD_IMAGE_BYTES = 3 * 1024 * 1024;
 const MAX_UPLOAD_DIMENSION = 3200;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const HEIC_IMAGE_TYPES = new Set(["image/heic", "image/heif"]);
 
 type AnalysisResult = {
   shifts?: Shift[];
@@ -68,7 +69,12 @@ function formatFileSize(bytes: number) {
 
 function isSupportedImage(file: File) {
   if (SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) return true;
+  if (isHeicImage(file)) return true;
   return /\.(?:jpe?g|png|webp)$/i.test(file.name);
+}
+
+function isHeicImage(file: File) {
+  return HEIC_IMAGE_TYPES.has(file.type.toLowerCase()) || /\.hei[cf]$/i.test(file.name);
 }
 
 function loadImage(file: File) {
@@ -81,10 +87,19 @@ function loadImage(file: File) {
     };
     image.onerror = () => {
       URL.revokeObjectURL(source);
-      reject(new Error("This image could not be opened. Use a JPEG, PNG, or WebP image."));
+      reject(new Error("This image could not be opened. Use a JPEG, PNG, WebP, or HEIC image."));
     };
     image.src = source;
   });
+}
+
+async function convertHeicToPng(file: File) {
+  const { default: heic2any } = await import("heic2any");
+  const converted = await heic2any({ blob: file, toType: "image/png", multiple: true });
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  if (!(blob instanceof Blob)) throw new Error("The HEIC photo could not be converted to PNG.");
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "timetable";
+  return new File([blob], `${baseName}.png`, { type: "image/png", lastModified: file.lastModified });
 }
 
 function encodeJpeg(canvas: HTMLCanvasElement, quality: number) {
@@ -140,6 +155,7 @@ export default function Home() {
   const [stage, setStage] = useState<"upload" | "reading" | "review" | "done">("upload");
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [convertingHeic, setConvertingHeic] = useState(false);
   const [googleReady, setGoogleReady] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection | null>(null);
@@ -179,20 +195,28 @@ export default function Home() {
   const selectedGoogleCalendar = googleConnection?.calendars.find((calendar) => calendar.id === googleConnection.selectedCalendarId);
   const selectedGoogleCalendarName = selectedGoogleCalendar?.summary ?? "Default calendar";
 
-  function chooseFile(nextFile?: File) {
+  async function chooseFile(nextFile?: File) {
     if (!nextFile) return;
     if (!isSupportedImage(nextFile)) {
-      setNotice("Use a JPEG, PNG, or WebP image.");
+      setNotice("Use a JPEG, PNG, WebP, or HEIC image.");
       return;
     }
     if (nextFile.size > MAX_SOURCE_IMAGE_BYTES) {
       setNotice("This photo is larger than 50 MB. Crop it closer to the timetable and try again.");
       return;
     }
-    if (preview) URL.revokeObjectURL(preview);
-    setFile(nextFile);
-    setPreview(URL.createObjectURL(nextFile));
-    setNotice("");
+    setConvertingHeic(isHeicImage(nextFile));
+    try {
+      const normalizedFile = isHeicImage(nextFile) ? await convertHeicToPng(nextFile) : nextFile;
+      if (preview) URL.revokeObjectURL(preview);
+      setFile(normalizedFile);
+      setPreview(URL.createObjectURL(normalizedFile));
+      setNotice(isHeicImage(nextFile) ? "HEIC photo converted to PNG." : "");
+    } catch {
+      setNotice("This HEIC photo could not be converted. Try exporting it as JPEG or PNG and choose it again.");
+    } finally {
+      setConvertingHeic(false);
+    }
   }
 
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
@@ -461,9 +485,9 @@ export default function Home() {
               {/* Blob previews are local-only and cannot use the framework image optimizer. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {preview ? <img src={preview} alt="Selected timetable" /> : <div className="camera">⌁</div>}
-              <div><b>{file ? file.name : "Take or choose a photo"}</b><span>{file ? `${formatFileSize(file.size)} · ${file.size > MAX_UPLOAD_IMAGE_BYTES ? "optimized before upload" : "Tap to replace it"}` : "Make sure the full table and day headers are visible"}</span></div>
+              <div><b>{convertingHeic ? "Converting HEIC to PNG…" : file ? file.name : "Take or choose a photo"}</b><span>{file ? `${formatFileSize(file.size)} · ${file.size > MAX_UPLOAD_IMAGE_BYTES ? "optimized before upload" : "Tap to replace it"}` : "JPEG, PNG, WebP, or HEIC · full table and day headers visible"}</span></div>
             </button>
-            <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" capture="environment" onChange={handleFile} />
+            <input ref={inputRef} hidden type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={handleFile} />
             <div className="photo-checklist" aria-label="Photo quality checklist">
               <p>Before reading</p>
               <ul>
@@ -474,7 +498,7 @@ export default function Home() {
               </ul>
             </div>
             {notice && <p className="notice">{notice}</p>}
-            <button className="primary wide" disabled={stage === "reading"} onClick={analyse}>
+            <button className="primary wide" disabled={stage === "reading" || convertingHeic} onClick={analyse}>
               {stage === "reading" ? <><span className="spinner" /> Reading your timetable…</> : <>Find my shifts <span>→</span></>}
             </button>
             <div className="trust-row"><span>✓ Review before adding</span><span>✓ Detects unclear times</span><span>✓ No photo storage</span></div>

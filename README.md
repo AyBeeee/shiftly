@@ -39,7 +39,8 @@ Nothing is written to Google Calendar before the final confirmation button is pr
 
 ## Features
 
-- Mobile camera capture and desktop image upload
+- Mobile camera capture and desktop image upload, including HEIC/HEIF photos from iPhone
+- Client-side HEIC/HEIF to PNG conversion before the standard upload workflow
 - Automatic client-side optimization of large timetable photos
 - Employee-name row matching
 - Day-header and date interpretation
@@ -80,7 +81,7 @@ flowchart LR
 | Hosting worker | `worker/index.ts` | Cloudflare-compatible application entrypoint |
 | Hosting configuration | `.openai/hosting.json` | Sites project and optional resource bindings |
 
-The browser accepts JPEG, PNG, and WebP images up to 50 MB. Files larger than 3 MB are resized to a maximum 3200-pixel edge and progressively encoded as JPEG until they fit safely within the hosted request limit, including multipart overhead. The analysis endpoint applies a final 10 MB limit, then sends the image to OpenAI in memory. The model must return a strict schema containing the day, date, start time, end time, title, and confidence for every detected shift.
+The browser accepts JPEG, PNG, WebP, and HEIC/HEIF images up to 50 MB. HEIC/HEIF images are decoded locally in the browser and converted to a PNG so they can be previewed and processed by the same workflow as other supported images. Files larger than 3 MB are resized to a maximum 3200-pixel edge and progressively encoded as JPEG until they fit safely within the hosted request limit, including multipart overhead. The analysis endpoint applies a final 10 MB limit, then sends the normalized image to OpenAI in memory. The model must return a strict schema containing the day, date, start time, end time, title, and confidence for every detected shift.
 
 ## Requirements
 
@@ -196,6 +197,8 @@ npm run lint
 npm test
 ```
 
+GitHub Actions runs the same type-check, lint, build, and rendered-worker tests on pull requests, `main`, and feature branches. Feature work should be developed on a branch, pulled up to date with `main`, committed only after these checks pass, pushed for review, and merged into `main` only after the checks are green.
+
 The rendered-worker tests cover the application shell, runtime configuration response, fail-closed key handling, and image-type validation. Live OpenAI calls and Google writes are intentionally not run by the automated suite because they require private credentials and create external usage.
 
 ## Deployment
@@ -245,7 +248,7 @@ Review the data-processing and retention settings of OpenAI and Google before us
 | Google session expired | Short-lived access token expired | Press **Connect Google** and retry |
 | No shifts found | Name mismatch or unreadable image | Use the printed name and retake the photo with the full table visible |
 | Photo is too large | The original exceeds 50 MB or remains oversized after optimization | Crop closer to the timetable, then choose the photo again |
-| Unsupported image | The file is not JPEG, PNG, or WebP | Export or convert the photo to JPEG |
+| Unsupported image | The file is not JPEG, PNG, WebP, or HEIC/HEIF | Export or convert the photo to JPEG or PNG |
 | Times appear uncertain | One or more cells were difficult to read | Correct highlighted values before importing |
 | Events use an unexpected timezone | Browser timezone differs from the work location | Correct the device/browser timezone before importing |
 
