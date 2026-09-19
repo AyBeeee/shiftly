@@ -54,7 +54,7 @@ test("analysis endpoint validates size before checking configuration", async () 
 
 test("analysis endpoint fails closed when AI is not configured", async () => {
   const form = new FormData();
-  form.set("name", "Baig, Abdullah");
+  form.set("name", "Taylor Morgan");
   form.set("image", new File(["small timetable"], "timetable.jpg", { type: "image/jpeg" }));
 
   const response = await request("/api/analyze", { method: "POST", body: form });
@@ -67,7 +67,7 @@ test("analysis endpoint fails closed when AI is not configured", async () => {
 
 test("analysis endpoint rejects unsupported image types", async () => {
   const form = new FormData();
-  form.set("name", "Baig, Abdullah");
+  form.set("name", "Taylor Morgan");
   form.set("image", new File(["not an image"], "timetable.svg", { type: "image/svg+xml" }));
 
   const response = await request("/api/analyze", { method: "POST", body: form });
